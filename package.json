@@ -1,0 +1,20 @@
+{
+  "name": "opencode-plugin-kafka",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "echo 'Linting not configured yet'"
+  },
+  "dependencies": {
+    "jsonpath-plus": "^9.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^2.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^2.0.0"
+  }
+}
