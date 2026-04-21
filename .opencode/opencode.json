@@ -3,7 +3,10 @@
   "instructions": [".opencode/rules/*.md"],
   "agent": {
     "general": {
-      "model": "minimax-coding-plan/minimax-coding-plan-M2.5"
+      "model": "zai-coding-plan/glm-4.7"
+    },
+    "explore": {
+      "model": "zai-coding-plan/glm-4.7"
     }
   },
   "mcp": {
