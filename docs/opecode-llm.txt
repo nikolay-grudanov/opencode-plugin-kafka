@@ -1,0 +1,37 @@
+# OpenCode Plugin Development
+
+Curated OpenCode documentation for building plugins, custom tools, and supporting agent workflows in JavaScript/TypeScript, including core docs, examples, ecosystem references, and local notes.
+
+## Official docs
+- [OpenCode plugins](https://opencode.ai/docs/plugins/): Core plugin concepts, load order, local/global plugin directories, npm plugin loading, hooks, events, compacting hooks, logging, and custom tools inside plugins. [web:41]
+- [OpenCode custom tools](https://opencode.ai/docs/custom-tools/): How to build standalone custom tools, define schemas, export multiple tools, and use tool execution context. [web:45]
+- [OpenCode agents](https://opencode.ai/docs/agents/): Agent and subagent behavior, delegation model, and where plugin-aware agents fit into orchestration. [page:1]
+- [OpenCode skills](https://opencode.ai/docs/skills/): Skill discovery, `SKILL.md` structure, and lazy-loading guidance for reusable agent instructions. [web:11]
+- [OpenCode ecosystem](https://opencode.ai/docs/ecosystem/): Community plugins, plugin templates, orchestration tooling, and examples of real-world OpenCode extensions. [page:2]
+- [OpenCode home](https://opencode.ai/docs/): Main documentation entrypoint. [web:9]
+
+## Examples
+- [Plugin examples](https://www.mintlify.com/anomalyco/opencode/sdk/plugin-examples): Example plugins for tools, GitHub integration, databases, testing, docs generation, performance monitoring, and multi-tool setups. [page:2]
+- [Community plugin list](https://opencode.ai/docs/ecosystem/): Real plugin projects such as notifications, background agents, worktrees, context pruning, and security-oriented extensions. [page:2]
+- [Awesome OpenCode](https://github.com/awesome-opencode/awesome-opencode): Curated repository of plugins, themes, agents, and ecosystem resources. [web:29]
+
+## Russian docs
+- [Плагины OpenCode](https://opencode.ai/docs/ru/plugins/): Русскоязычная документация по плагинам. [page:3]
+- [Пользовательские инструменты](https://opencode.ai/docs/ru/custom-tools/): Русскоязычная документация по custom tools. [page:3]
+- [Агенты OpenCode](https://opencode.ai/docs/ru/agents/): Русскоязычная документация по агентам. [page:3]
+- [Навыки агента](https://opencode.ai/docs/ru/skills/): Русскоязычная документация по skills. [page:3]
+
+## Runtime and dependencies
+- [Bun Shell API](https://bun.sh/docs/runtime/shell): Shell execution API used in many plugin examples and event handlers. [page:2]
+- [Bun install docs](https://bun.sh/docs/cli/install): Package installation behavior relevant to plugin dependencies. [page:2]
+- [Zod](https://zod.dev/): Schema validation commonly used in tool argument definitions. [page:2]
+
+## Local notes
+- [OpenCode plugin notes](docs/opencode/plugins_notes.md): Local curated summary for quick MCP reading.
+
+## Suggested reading order
+- [OpenCode plugins](https://opencode.ai/docs/plugins/) [web:41]
+- [OpenCode custom tools](https://opencode.ai/docs/custom-tools/) [web:45]
+- [Plugin examples](https://www.mintlify.com/anomalyco/opencode/sdk/plugin-examples) [page:2]
+- [OpenCode ecosystem](https://opencode.ai/docs/ecosystem/) [page:2]
+- [OpenCode plugin notes](docs/opencode/plugins_notes.md)

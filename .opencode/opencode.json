@@ -1,0 +1,25 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [".opencode/rules/*.md"],
+  "agent": {
+    "general": {
+      "model": "minimax-coding-plan/minimax-coding-plan-M2.5"
+    }
+  },
+  "mcp": {
+    "opencode-docs": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "mcpdoc",
+        "--urls",
+        "OpenCode:/home/gna/workspase/projects/opencode-plugin-kafka/docs/opecode-llm.txt",
+        "--follow-redirects",
+        "--allowed-domains",
+        "opencode.ai",
+        "--transport",
+        "stdio"
+      ]
+    }
+  }
+}
