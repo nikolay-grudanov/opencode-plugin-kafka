@@ -62,7 +62,7 @@
 - `buildPrompt` с `BigInt` — не поддерживается `JSON.stringify`, должен конвертироваться через `String()`
 - `buildPrompt` с `0` (number zero) — `"0"`, не fallback
 - `buildPrompt` с пустой строкой `""` — пустая строка возвращается как есть (не fallback)
-- `parseConfig` с топиком в `rules`, которого нет в `topics` — выбрасывает ошибку `Error` с сообщением `"Topics without rules: <список непокрытых топиков>"`
+- `parseConfig` с топиком в `rules`, которого нет в `topics` — **не** является ошибкой. Проверяется только `topics → rules` (каждый топик из `topics` должен быть покрыт правилом). Правило для несуществующего в `topics` топика — допустимо (ignorable rule).
 
 ## Requirements *(mandatory)*
 
@@ -91,7 +91,7 @@
 
 ### Key Entities
 
-- **Rule**: Правило маршрутизации сообщений. Содержит `topic`, `prompt_template`, `prompt_field`, `command`, `description`. Определяется через `RuleSchema`.
+- **Rule**: Правило маршрутизации сообщений. Содержит `name`, `topic`, `agent`, `condition`, `command`, `prompt_field`. Определяется через `RuleSchema`.
 - **PluginConfig**: Корневая конфигурация плагина. Содержит `topics` (список мониторимых топиков) и `rules` (список правил маршрутизации). Определяется через `PluginConfigSchema`.
 - **Payload**: JSON-объект сообщения из Kafka. Тип — произвольный объект.
 

@@ -91,8 +91,10 @@ PluginConfig
     └── prompt_field: string (JSONPath)
 ```
 
-**Validation Rule (FR-017)**:
+**Validation Rule (FR-017)** — one-way check (`topics → rules` only):
 ```typescript
+// FR-017: проверяется только что каждый топик из topics покрыт правилами
+// Правило для несуществующего в topics топика — допустимо (ignorable rule)
 const coveredTopics = new Set(config.rules.map(r => r.topic));
 const uncovered = config.topics.filter(t => !coveredTopics.has(t));
 if (uncovered.length > 0) {
@@ -128,7 +130,7 @@ if (uncovered.length > 0) {
 | `payload = { count: 0 }`, `prompt_field = "$.count"` | Возвращает `"0"` (String(0)) |
 | `payload = { active: true }`, `prompt_field = "$.active"` | Возвращает `"true"` |
 | `payload = { active: false }`, `prompt_field = "$.active"` | Возвращает `"false"` |
-| `payload = { value: BigInt(42) }`, `prompt_field = "$.value"` | Возвращает `"42"` (String() handles BigInt) |
+| `payload = { value: BigInt(42) }`, `prompt_field = "$.value"` | Возвращает `"42"` (String() handles BigInt). **Note**: BigInt in JSON.stringify payload is impossible since JSON.parse cannot deserialize BigInt — this edge case applies only to in-memory JavaScript objects, not JSON-parsed payloads.
 | `payload = { text: "" }`, `prompt_field = "$.text"` | Возвращает `""` (пустая строка не fallback) |
 | `payload = { value: null }`, `prompt_field = "$.value"` | Возвращает fallback `"Process this payload"` |
 | `payload = undefined`, `prompt_field = "$.any"` | Возвращает fallback |
