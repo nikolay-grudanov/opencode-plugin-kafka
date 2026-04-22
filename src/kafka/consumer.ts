@@ -294,7 +294,7 @@ export async function eachMessageHandler(
             timestamp: new Date().toISOString(),
           }),
         );
-        await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]);
+        await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
         return;
       }
       // Default: отправляем tombstone в DLQ
@@ -307,7 +307,7 @@ export async function eachMessageHandler(
       }, error);
       state.dlqMessagesCount++;
       logDlqRate(state);
-      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]);
+      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
       return;
     }
 
@@ -323,7 +323,7 @@ export async function eachMessageHandler(
       }, error);
       state.dlqMessagesCount++;
       logDlqRate(state);
-      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]);
+      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
       return;
     }
 
@@ -341,7 +341,7 @@ export async function eachMessageHandler(
       }, error);
       state.dlqMessagesCount++;
       logDlqRate(state);
-      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]);
+      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
       return;
     }
 
@@ -359,7 +359,7 @@ export async function eachMessageHandler(
       }, error);
       state.dlqMessagesCount++;
       logDlqRate(state);
-      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]);
+      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
       return;
     }
 
@@ -376,7 +376,7 @@ export async function eachMessageHandler(
         }),
       );
       logDlqRate(state);
-      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]);
+      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
       return;
     }
 
@@ -404,7 +404,7 @@ export async function eachMessageHandler(
 
     // 7. Commit offset on success с throttle retry
     await executeWithThrottleRetry(
-      () => commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]),
+      () => commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]),
       'commitOffsets',
     );
   } catch (error) {
@@ -423,7 +423,7 @@ export async function eachMessageHandler(
     logDlqRate(state);
 
     await executeWithThrottleRetry(
-      () => commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]),
+      () => commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]),
       'commitOffsets',
     );
   }
@@ -630,10 +630,10 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
   );
 
   // 1. Создаем Kafka клиент (FR-019)
-  const kafka = createKafkaClient(process.env);
+  const { kafka, validatedEnv } = createKafkaClient(process.env);
 
   // 2. Создаем consumer (FR-020)
-  const consumer = createConsumer(kafka);
+  const consumer = createConsumer(kafka, validatedEnv.KAFKA_GROUP_ID);
 
   // 3. Создаем DLQ producer (FR-021)
   const dlqProducer = createDlqProducer(kafka);
@@ -695,8 +695,8 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
       process.exit(0);
     };
 
-    process.on('SIGTERM', shutdownHandler);
-    process.on('SIGINT', shutdownHandler);
+    process.once('SIGTERM', shutdownHandler);
+    process.once('SIGINT', shutdownHandler);
 
     // 8. Логируем что consumer запущен
     console.log(
