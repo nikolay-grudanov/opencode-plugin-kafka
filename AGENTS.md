@@ -1,37 +1,81 @@
-# opencode-plugin-kafka Development Guidelines
+# opencode-plugin-kafka
 
-Auto-generated from all feature plans. Last updated: 2026-04-21
+## Tech Stack
 
-## Active Technologies
+- **TypeScript 6.x** (ES2022 target, ESNext modules, `moduleResolution: bundler`)
+- **zod** — runtime config validation via Zod schemas
+- **jsonpath-plus** — JSONPath queries для фильтрации сообщений
+- **vitest** — unit + integration testing
+- **testcontainers-node + Redpanda** — integration tests (не Apache Kafka)
 
-- TypeScript 5.x + `zod` (runtime validation), `jsonpath-plus` (JSONPath queries), `vitest` (testing) (001-new-specification)
+## Команды
 
-## Project Structure
-
-```text
-src/
-tests/
+```bash
+npm run check        # lint + test (порядок важен)
+npm run lint         # eslint src/**/*.ts
+npm run test         # vitest
+npm run test:coverage # vitest --coverage
+npx vitest tests/unit/routing.test.ts  # конкретный файл
 ```
 
-## Commands
+## Coverage Threshold
 
-npm test && npm run lint
+**90%** для lines, branches, functions, statements.
 
-## Code Style
+**Важно**: Из coverage исключены type-only файлы:
+- `src/core/types.ts`
+- `src/core/index.ts`
 
-TypeScript 5.x: Follow standard conventions
+Эти файлы содержат только интерфейсы и re-exports — они не имеют runtime кода.
 
-## Recent Changes
+## Структура
 
-- 001-new-specification: Added TypeScript 5.x + `zod` (runtime validation), `jsonpath-plus` (JSONPath queries), `vitest` (testing)
+```
+src/
+├── core/
+│   ├── config.ts    # parseConfig (Zod validation + FR-017 topic coverage)
+│   ├── routing.ts   # matchRule — pure function
+│   ├── prompt.ts    # buildPrompt (String() для примитивов)
+│   └── index.ts     # Public API (re-exports из schemas)
+├── schemas/
+│   └── index.ts     # Zod schemas + types (z.infer<>)
+└── index.ts         # Plugin entry point
 
-<!-- MANUAL ADDITIONS START -->
-## Checklists
+tests/
+├── unit/            # pure function tests (vitest)
+│   ├── config.test.ts
+│   ├── routing.test.ts
+│   ├── prompt.test.ts
+│   └── types-verification.test.ts
+└── integration/     # testcontainers + Redpanda
+```
 
-- **podman.md** (Phase 7 only): Podman setup requirements для Integration Tests. Игнорировать до Phase 7.
+## Типы (spec 002)
 
-## Phase Execution
+**Важно**: `src/core/types.ts` УДАЛЁН. Типы `Rule`, `PluginConfig`, `Payload` экспортируются из `src/schemas/index.ts` через `z.infer<>`:
 
-- **Phase 1-6**: Выполнять без проверки podman.md
-- **Phase 7**: Проверить podman.md перед Integration Tests
-<!-- MANUAL ADDITIONS END -->
+```typescript
+// Правильный импорт
+import type { Rule } from '../schemas/index.js';
+
+// Неправильно (types.ts удалён)
+import type { Rule } from '../core/types'; // ← НЕ СУЩЕСТВУЕТ
+```
+
+## Конституция (5 NON-NEGOTIABLE принципов)
+
+После любого изменения кода запускай `kafka-constitution-compliance` agent для проверки:
+
+1. **Strict Initialization** — невалидная конфигурация падает при старте (fail-fast), включая FR-017 topic coverage validation
+2. **Domain Isolation** — routing logic как pure function без side effects
+3. **Resiliency** — try-catch в eachMessage handler, ошибки не крашат consumer
+4. **No-State Consumer** — никакого session state между сообщениями
+5. **Test-First Development** — unit tests писать до имплементации, 90%+ coverage
+
+## Integration Tests
+
+**Только Redpanda** (не Apache Kafka). Причина: 10-100x быстрее запуск в CI/CD.
+
+## OpenCode Config
+
+Агент читает инструкции из `.opencode/rules/*.md` (behavioral-guidelines, planning-workflow, language-safety).

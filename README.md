@@ -30,7 +30,7 @@ npm install --save-dev vitest @types/node
 
 ```typescript
 import { parseConfig } from './src/core/config';
-import type { PluginConfig } from './src/core/types';
+import type { PluginConfig } from './src/schemas/index.js';
 
 const rawJson = {
   topics: ['security', 'tasks'],
@@ -130,19 +130,22 @@ npx vitest --watch
 ```
 src/
 ├── core/
-│   ├── config.ts      # parseConfig + схемы валидации
-│   ├── routing.ts     # matchRule
-│   ├── prompt.ts      # buildPrompt
-│   └── types.ts       # TypeScript интерфейсы
+│   ├── config.ts      # parseConfig + Zod валидация + topic coverage проверка
+│   ├── routing.ts     # matchRule — pure function
+│   ├── prompt.ts      # buildPrompt — обработка примитивов через String()
+│   └── index.ts       # Public API exports (re-exports из schemas)
 ├── schemas/
-│   └── index.ts       # Экспорт Zod схем
-└── index.ts           # Публичный API
+│   └── index.ts       # Zod схемы + типы (z.infer<>)
+└── index.ts           # Plugin entry point (re-exports из core/index)
 
 tests/
-└── unit/
-    ├── config.test.ts     # Тесты parseConfig
-    ├── routing.test.ts    # Тесты matchRule
-    └── prompt.test.ts     # Тесты buildPrompt
+├── unit/              # pure function tests (vitest)
+│   ├── config.test.ts     # parseConfig, FR-017 topic coverage
+│   ├── routing.test.ts    # matchRule
+│   ├── prompt.test.ts     # buildPrompt, примитивы
+│   └── types-verification.test.ts  # TypeScript type checking
+└── integration/       # testcontainers + Redpanda
+    └── routing-flow.test.ts  # End-to-end routing flow
 ```
 
 ## Edge Cases
@@ -154,6 +157,23 @@ tests/
 | Отсутствует prompt_field | По умолчанию `"$"` | Полный payload |
 | Объект как значение поля | `{ details: { a: 1 } }` | JSON.stringify |
 | Пустой payload | `{}` | Fallback: `"Process this payload"` |
+| Примитив number | `{ count: 42 }` | `"42"` (String conversion) |
+| Примитив boolean | `{ active: true }` | `"true"` |
+| Примитив BigInt | `{ big: BigInt(42) }` | `"42"` (String conversion, не JSON.stringify) |
+| Число 0 | `{ count: 0 }` | `"0"` (не fallback) |
+| Пустая строка | `{ name: "" }` | `""` (не fallback) |
+| null/undefined | `{ value: null }` | Fallback: `"Process this payload"` |
+
+## FR-017: Topic Coverage Validation
+
+При старте `parseConfig` проверяет что каждый топик из `topics` покрыт хотя бы одним правилом:
+
+```typescript
+// topics: ['security', 'audit'] с правилами только для 'security'
+// → Error: "Topics without rules: audit"
+```
+
+Непокрытые топики выбрасывают `Error` (не `ZodError`) с перечислением.
 
 ## Зависимости
 

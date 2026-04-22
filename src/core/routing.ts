@@ -4,7 +4,7 @@
  */
 
 import { JSONPath } from 'jsonpath-plus';
-import type { Rule, Payload } from './types.js';
+import type { Rule, Payload } from '../schemas/index.js';
 
 /**
  * Находит первое подходящее правило для payload и topic.

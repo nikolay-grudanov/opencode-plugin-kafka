@@ -14,7 +14,7 @@ import type { StartedTestContainer } from 'testcontainers';
 import { parseConfig } from '../../src/core/config';
 import { matchRule } from '../../src/core/routing';
 import { buildPrompt } from '../../src/core/prompt';
-import type { Rule, PluginConfig } from '../../src/core/types';
+import type { Rule, PluginConfig } from '../../src/schemas/index.js';
 
 describe('Integration Tests: Routing Flow', () => {
   let redpandaContainer: StartedTestContainer | null = null;

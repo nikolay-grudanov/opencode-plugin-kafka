@@ -3,7 +3,7 @@
  */
 
 import { JSONPath } from 'jsonpath-plus';
-import type { Rule } from './types.js';
+import type { Rule } from '../schemas/index.js';
 
 /**
  * Строка fallback для случаев, когда поле не найдено.
@@ -57,8 +57,8 @@ export function buildPrompt(payload: unknown, rule: Rule): string {
     // Объект/массив → JSON.stringify (compact mode)
     text = JSON.stringify(extracted);
   } else {
-    // Примитивные типы (number, boolean, etc) → fallback
-    return FALLBACK_PROMPT;
+    // Примитивные типы (number, boolean, bigint) → строковое представление
+    text = String(extracted);
   }
 
   // 6. Добавляем префикс команды если задан
