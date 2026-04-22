@@ -20,6 +20,7 @@ permission:
   read: deny
   edit: deny
   task: deny
+  todowrite: allow
 bash:
     "*": deny
 ---

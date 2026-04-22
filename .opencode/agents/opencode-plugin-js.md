@@ -8,6 +8,7 @@ tools:
     "*": true
     opencode-docs: true
 permission:
+    todowrite: allow
     bash:
         "*": allow
 ---

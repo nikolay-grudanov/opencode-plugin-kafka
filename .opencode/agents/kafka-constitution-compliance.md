@@ -6,6 +6,7 @@ model: zai-coding-plan/glm-4.7
 temperature: 0.6
 permission:
   "*": allow
+  todowrite: allow
 ---
 
 # Роль агента

@@ -13,6 +13,7 @@ tools:
   opencode-docs: true
 permission:
   edit: deny
+  todowrite: allow
 bash:
     "*": deny
     "grep *": allow
