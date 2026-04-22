@@ -12,7 +12,7 @@ describe('buildPrompt', () => {
         agent: 'test-agent',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('{"message":"Hello world"}');
     });
@@ -29,7 +29,7 @@ describe('buildPrompt', () => {
         prompt_field: '$.task_text',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('/audit Audit the code');
     });
@@ -51,7 +51,7 @@ describe('buildPrompt', () => {
         prompt_field: '$.details',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('{"name":"Alice","age":30,"email":"alice@example.com"}');
     });
@@ -69,7 +69,7 @@ describe('buildPrompt', () => {
         prompt_field: '$.items',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('[1,2,3,4,5]');
     });
@@ -85,7 +85,7 @@ describe('buildPrompt', () => {
         prompt_field: '$.missing',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('Process this payload');
     });
@@ -101,7 +101,7 @@ describe('buildPrompt', () => {
         prompt_field: '$',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('Process this payload');
     });
@@ -115,7 +115,7 @@ describe('buildPrompt', () => {
         prompt_field: '$',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('Process this payload');
     });
@@ -131,7 +131,7 @@ describe('buildPrompt', () => {
         prompt_field: '$.value',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('Process this payload');
     });
@@ -145,7 +145,7 @@ describe('buildPrompt', () => {
         prompt_field: '$.value',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('Process this payload');
     });
@@ -161,7 +161,7 @@ describe('buildPrompt', () => {
         prompt_field: '$.count',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('42');
     });
@@ -175,7 +175,7 @@ describe('buildPrompt', () => {
         prompt_field: '$.count',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('0');
     });
@@ -189,7 +189,7 @@ describe('buildPrompt', () => {
         prompt_field: '$.active',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('true');
     });
@@ -203,7 +203,7 @@ describe('buildPrompt', () => {
         prompt_field: '$.active',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('false');
     });
@@ -217,7 +217,7 @@ describe('buildPrompt', () => {
         prompt_field: '$.big',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('42');
     });
@@ -231,9 +231,103 @@ describe('buildPrompt', () => {
         prompt_field: '$.text',
       };
 
-      const result = buildPrompt(payload, rule);
+      const result = buildPrompt(rule, payload);
 
       expect(result).toBe('');
+    });
+  });
+
+  describe('Non-object payloads handled', () => {
+    it('should handle number as payload', () => {
+      const payload = 42;
+      const rule: Rule = {
+        name: 'number-payload',
+        topic: 'test',
+        agent: 'test-agent',
+      };
+
+      const result = buildPrompt(rule, payload);
+
+      expect(result).toBe('42');
+    });
+
+    it('should handle string as payload', () => {
+      const payload = 'hello';
+      const rule: Rule = {
+        name: 'string-payload',
+        topic: 'test',
+        agent: 'test-agent',
+      };
+
+      const result = buildPrompt(rule, payload);
+
+      expect(result).toBe('hello');
+    });
+
+    it('should handle boolean as payload', () => {
+      const payload = true;
+      const rule: Rule = {
+        name: 'boolean-payload',
+        topic: 'test',
+        agent: 'test-agent',
+      };
+
+      const result = buildPrompt(rule, payload);
+
+      expect(result).toBe('true');
+    });
+
+    it('should handle array as payload', () => {
+      const payload = [1, 2, 3];
+      const rule: Rule = {
+        name: 'array-payload',
+        topic: 'test',
+        agent: 'test-agent',
+      };
+
+      const result = buildPrompt(rule, payload);
+
+      expect(result).toBe('[1,2,3]');
+    });
+  });
+
+  describe('Template substitution works', () => {
+    it('should correctly substitute multiple placeholders', () => {
+      const payload = {
+        user: 'Alice',
+        task: 'Review PR #123',
+      };
+      const rule: Rule = {
+        name: 'multi-placeholder',
+        topic: 'tasks',
+        agent: 'task-agent',
+        prompt_field: '$',
+        command: 'assign',
+      };
+
+      const result = buildPrompt(rule, payload);
+
+      expect(result).toBe('/assign {"user":"Alice","task":"Review PR #123"}');
+    });
+
+    it('should handle complex nested structures', () => {
+      const payload = {
+        project: {
+          name: 'Kafka Plugin',
+          version: '1.0.0',
+          features: ['routing', 'parsing'],
+        },
+      };
+      const rule: Rule = {
+        name: 'complex-nested',
+        topic: 'projects',
+        agent: 'project-agent',
+        prompt_field: '$.project',
+      };
+
+      const result = buildPrompt(rule, payload);
+
+      expect(result).toBe('{"name":"Kafka Plugin","version":"1.0.0","features":["routing","parsing"]}');
     });
   });
 });

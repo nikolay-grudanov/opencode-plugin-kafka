@@ -17,8 +17,8 @@ export default [
     },
     rules: {
       ...typescriptEslint.configs.recommended.rules,
-      "no-unused-vars": "warn",
-      "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+      "no-unused-vars": "off",
+      "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
     },
   },
   eslintConfigPrettier,

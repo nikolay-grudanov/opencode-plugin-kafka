@@ -6,16 +6,16 @@
  */
 
 // Re-export types from schemas (derived from z.infer<>)
-export type { Rule, PluginConfig, Payload } from '../schemas/index.js';
+export type { Rule, RuleV003, PluginConfig, PluginConfigV003, Payload, KafkaMessage, ProcessingResult } from '../schemas/index.js';
 
 // Re-export schemas for convenience
-export { RuleSchema, PluginConfigSchema } from '../schemas/index.js';
+export { RuleSchema, PluginConfigSchema, RuleV003Schema, PluginConfigV003Schema } from '../schemas/index.js';
 
 // Prompt building functions
-export { buildPrompt } from './prompt.js';
+export { buildPrompt, buildPromptV003 } from './prompt.js';
 
 // Re-export routing functions
-export { matchRule } from './routing.js';
+export { matchRule, matchRuleV003 } from './routing.js';
 
 // Export configuration parser
-export { parseConfig } from './config.js';
+export { parseConfig, parseConfigV003 } from './config.js';

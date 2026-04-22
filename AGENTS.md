@@ -79,3 +79,10 @@ import type { Rule } from '../core/types'; // ← НЕ СУЩЕСТВУЕТ
 ## OpenCode Config
 
 Агент читает инструкции из `.opencode/rules/*.md` (behavioral-guidelines, planning-workflow, language-safety).
+
+## Active Technologies
+- TypeScript 6.x (ES2022 target, ESNext modules, `moduleResolution: bundler`) + `kafkajs` (Kafka client), `zod` (runtime validation), `jsonpath-plus` (JSONPath queries), `vitest` (testing), `testcontainers-node` + `Redpanda` (integration tests) (003-kafka-consumer)
+- N/A (Kafka-based message queue, no local persistence) (003-kafka-consumer)
+
+## Recent Changes
+- 003-kafka-consumer: Added TypeScript 6.x (ES2022 target, ESNext modules, `moduleResolution: bundler`) + `kafkajs` (Kafka client), `zod` (runtime validation), `jsonpath-plus` (JSONPath queries), `vitest` (testing), `testcontainers-node` + `Redpanda` (integration tests)
