@@ -3,7 +3,10 @@
   "instructions": [".opencode/rules/*.md"],
   "agent": {
     "general": {
-      "model": "lemonade/extra.Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-GGUF"
+      "model": "lemonade/extra.Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-GGUF",
+      "permission": {
+        "todowrite": "allow"
+      }
     },
     "explore": {
       "model": "lemonade/extra.Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-GGUF"
