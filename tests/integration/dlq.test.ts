@@ -19,10 +19,21 @@ import type { Producer } from 'kafkajs';
 import { createRedpandaContainer, cleanupRedpandaContainer } from './setup';
 import type { StartedTestContainer } from 'testcontainers';
 
+/**
+ * Mock состояние consumer для тестов (Constitution Principle IV: No-State Consumer)
+ */
+interface MockConsumerState {
+  isShuttingDown: boolean;
+  totalMessagesProcessed: number;
+  dlqMessagesCount: number;
+  lastDlqRateLogTime: number;
+}
+
 describe('Integration Tests: DLQ Flow', () => {
   let redpandaContainer: StartedTestContainer | null = null;
   let mockDlqProducer: Producer;
   let mockCommitOffsets: ReturnType<typeof vi.fn>;
+  let mockState: MockConsumerState;
   let mockConfig: PluginConfigV003;
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
@@ -58,6 +69,14 @@ describe('Integration Tests: DLQ Flow', () => {
 
     // Создаем mock commitOffsets
     mockCommitOffsets = vi.fn().mockResolvedValue(undefined);
+
+    // Создаем mock state
+    mockState = {
+      isShuttingDown: false,
+      totalMessagesProcessed: 0,
+      dlqMessagesCount: 0,
+      lastDlqRateLogTime: Date.now(),
+    };
 
     // Создаем тестовую конфигурацию
     mockConfig = {
@@ -101,7 +120,7 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Проверяем что Producer.send был вызван (сообщение отправлено в DLQ)
       expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
@@ -139,7 +158,7 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify DLQ send
       expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
@@ -170,7 +189,7 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify DLQ send
       expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
@@ -197,7 +216,7 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
       const envelope = JSON.parse(sendCall[0].messages[0].value as string);
@@ -233,7 +252,7 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
       const afterCall = Date.now();
 
       const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
@@ -261,7 +280,7 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
       const record = sendCall[0];
@@ -286,7 +305,7 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
       const record = sendCall[0];
@@ -320,7 +339,7 @@ describe('Integration Tests: DLQ Flow', () => {
 
       // eachMessageHandler НЕ должен бросить исключение
       await expect(
-        eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets)
+        eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState)
       ).resolves.not.toThrow();
 
       // Проверяем что commitOffsets был вызван (consumer продолжает работать)
@@ -346,7 +365,7 @@ describe('Integration Tests: DLQ Flow', () => {
       const kafkaError = new Error('Kafka connection failed');
       vi.mocked(mockDlqProducer.send).mockRejectedValueOnce(kafkaError);
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Проверяем что console.error был вызван
       expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
@@ -408,7 +427,7 @@ describe('Integration Tests: DLQ Flow', () => {
       // Обрабатываем все сообщения
       for (const payload of payloads) {
         await expect(
-          eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets)
+          eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState)
         ).resolves.not.toThrow();
       }
 
@@ -434,9 +453,9 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
-      // Step 1: Verify DLQ send
+      // Verify DLQ send
       expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
       const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
       const envelope = JSON.parse(sendCall[0].messages[0].value as string);
@@ -456,7 +475,7 @@ describe('Integration Tests: DLQ Flow', () => {
       // (already verified by expect().resolves.not.toThrow())
     });
 
-    it('должен обрабатывать полный поток: matchRule throws → DLQ → commit', async () => {
+    it('должен обрабатывать полный поток: matchRuleV003 throws → DLQ → commit', async () => {
       // Mock matchRuleV003 to throw
       vi.spyOn(await import('../../src/core/routing.js'), 'matchRuleV003').mockImplementationOnce(() => {
         throw new Error('matchRuleV003 failed');
@@ -474,7 +493,7 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify DLQ send
       expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
@@ -506,7 +525,7 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify DLQ send (catch-all в eachMessageHandler отправляет в DLQ)
       expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
@@ -532,7 +551,7 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify console.log was called with dlq_sent event
       expect(consoleLogSpy).toHaveBeenCalled();

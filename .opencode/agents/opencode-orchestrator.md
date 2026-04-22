@@ -2,10 +2,22 @@
 name: opencode-orchestrator
 description: Классифицирует задачи по доменам (Kafka, OpenCode, общие), выбирает подходящих агентов, делегирует задачи и координирует работу нескольких агентов при выполнении комплексных задач.
 mode: primary
-model: minimax-coding-plan/MiniMax-M2.7
-temperature: 0.7
+model: zai-coding-plan/glm-4.7
+temperature: 0.4
+tools:
+  "*": false
+  task: true
+  "think-mcp*": true
+  "context7*": true
+  "repomix*": true
 permission:
-  "*": allow
+  webfetch: deny
+  read: deny
+  edit: deny
+  task: allow
+  todowrite: allow
+bash:
+    "*": deny
 ---
 
 # Роль агента
@@ -99,7 +111,12 @@ permission:
 Примеры делегирования:
 - "Написать unit тест для Kafka consumer" → kafka-test-orchestrator (или kafka-constitution-compliance если это проверка)
 - "Проанализировать код на соответствие конституции Kafka" → kafka-constitution-compliance
+- "Проверить безопасность кода" → security-reviewer
+- "Проектировать архитектуру" → architect
 - "Создать новый agent для X" → opencode-agent-system-prompt-author
+- "Реализовать функцию X" → code-executor
+- "Обновить README" → documentation-agent
+- "Создать тест-стратегию" → qa-engineer
 - "Нестандартная задача без специализированного агента" → general с описанием задачи
 
 # Доменные приоритеты

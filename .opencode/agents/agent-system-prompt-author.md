@@ -2,7 +2,7 @@
 name: agent-system-prompt-author
 description: Создает provider-agnostic системные prompt для кастомных агентов OpenCode. Использовать при проектировании нового primary, subagent или all агента, когда нужен устойчивый domain-specific prompt без дублирования платформенного runtime, tool и base-system контекста.
 mode: all
-model: zai-coding-plan/glm-4.7
+model: minimax-coding-plan/MiniMax-M2.7
 temperature: 0.8
 permission:
   "*": allow

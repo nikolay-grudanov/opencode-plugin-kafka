@@ -57,30 +57,36 @@ export type PluginConfig = z.infer<typeof PluginConfigSchema>;
 /**
  * Zod schema for Kafka environment variables
  *
- * Validates Kafka client configuration from process.env
+ * Validates Kafka client configuration from process.env.
+ * Uses .passthrough() to allow extra process.env keys (PATH, HOME, USER, etc.).
  *
  * @see https://kafka.js.org/docs/configuration
  */
-export const kafkaEnvSchema = z.object({
-  // Required fields - strict mode, no defaults
-  KAFKA_BROKERS: z.string().min(1, 'KAFKA_BROKERS is required'),
-  KAFKA_CLIENT_ID: z.string().min(1, 'KAFKA_CLIENT_ID is required'),
-  KAFKA_GROUP_ID: z.string().min(1, 'KAFKA_GROUP_ID is required'),
+export const kafkaEnvSchema = z
+  .object({
+    // Required fields - no defaults
+    KAFKA_BROKERS: z.string().min(1, 'KAFKA_BROKERS is required'),
+    KAFKA_CLIENT_ID: z.string().min(1, 'KAFKA_CLIENT_ID is required'),
+    KAFKA_GROUP_ID: z.string().min(1, 'KAFKA_GROUP_ID is required'),
 
-  // Optional SSL configuration
-  KAFKA_SSL: z.coerce.boolean().optional(),
+    // Optional SSL configuration (must be lowercase "true" or "false")
+    KAFKA_SSL: z.enum(['true', 'false']).optional().transform((v) => v === 'true'),
 
-  // Optional SASL authentication
-  KAFKA_USERNAME: z.string().optional(),
-  KAFKA_PASSWORD: z.string().optional(),
-  KAFKA_SASL_MECHANISM: z.string().optional(),
+    // Optional SASL authentication
+    KAFKA_USERNAME: z.string().optional(),
+    KAFKA_PASSWORD: z.string().optional(),
+    KAFKA_SASL_MECHANISM: z.string().optional(),
 
-  // Optional DLQ configuration
-  KAFKA_DLQ_TOPIC: z.string().optional(),
+    // Optional DLQ configuration
+    KAFKA_DLQ_TOPIC: z.string().optional(),
 
-  // Optional config file path
-  KAFKA_ROUTER_CONFIG: z.string().optional(),
-});
+    // Optional config file path
+    KAFKA_ROUTER_CONFIG: z.string().optional(),
+
+    // Optional tombstone handling (must be lowercase "true" or "false")
+    KAFKA_IGNORE_TOMBSTONES: z.enum(['true', 'false']).optional().transform((v) => v === 'true'),
+  })
+  .passthrough();
 
 /**
  * TypeScript type for KafkaEnv — derived from kafkaEnvSchema

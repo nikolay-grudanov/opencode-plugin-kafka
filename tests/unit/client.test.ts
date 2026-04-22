@@ -26,11 +26,12 @@ describe('createKafkaClient', () => {
       process.env.KAFKA_CLIENT_ID = 'test-client';
       process.env.KAFKA_GROUP_ID = 'test-group';
 
-      const kafka = createKafkaClient(process.env);
+      const { kafka, validatedEnv } = createKafkaClient(process.env);
 
       expect(kafka).toBeDefined();
       expect(kafka).toHaveProperty('consumer');
       expect(kafka).toHaveProperty('producer');
+      expect(validatedEnv.KAFKA_BROKERS).toBe('localhost:9092');
     });
   });
 
@@ -71,11 +72,37 @@ describe('createKafkaClient', () => {
       process.env.KAFKA_GROUP_ID = 'test-group';
       process.env.KAFKA_SSL = 'true';
 
-      const kafka = createKafkaClient(process.env);
+      const { kafka, validatedEnv } = createKafkaClient(process.env);
 
       expect(kafka).toBeDefined();
+      expect(validatedEnv.KAFKA_SSL).toBe(true);
       // Проверяем что Kafka client создан
       // (подробная проверка конфигурации будет в интеграционных тестах)
+    });
+  });
+
+  describe('SSL disabled when KAFKA_SSL=false', () => {
+    it('должен отключить SSL когда KAFKA_SSL=false', () => {
+      process.env.KAFKA_BROKERS = 'localhost:9092';
+      process.env.KAFKA_CLIENT_ID = 'test-client';
+      process.env.KAFKA_GROUP_ID = 'test-group';
+      process.env.KAFKA_SSL = 'false';
+
+      const { validatedEnv } = createKafkaClient(process.env);
+
+      expect(validatedEnv.KAFKA_SSL).toBe(false);
+    });
+  });
+
+  describe('KAFKA_SSL not set returns false', () => {
+    it('должен вернуть false когда KAFKA_SSL не установлен', () => {
+      process.env.KAFKA_BROKERS = 'localhost:9092';
+      process.env.KAFKA_CLIENT_ID = 'test-client';
+      process.env.KAFKA_GROUP_ID = 'test-group';
+
+      const { validatedEnv } = createKafkaClient(process.env);
+
+      expect(validatedEnv.KAFKA_SSL).toBe(false);
     });
   });
 
@@ -87,9 +114,10 @@ describe('createKafkaClient', () => {
       process.env.KAFKA_USERNAME = 'user';
       process.env.KAFKA_PASSWORD = 'pass';
 
-      const kafka = createKafkaClient(process.env);
+      const { kafka, validatedEnv } = createKafkaClient(process.env);
 
       expect(kafka).toBeDefined();
+      expect(validatedEnv.KAFKA_USERNAME).toBe('user');
       // SASL будет сконфигурирован с механизмом по умолчанию (plain)
     });
 
@@ -101,9 +129,10 @@ describe('createKafkaClient', () => {
       process.env.KAFKA_PASSWORD = 'pass';
       process.env.KAFKA_SASL_MECHANISM = 'scram-sha-256';
 
-      const kafka = createKafkaClient(process.env);
+      const { kafka, validatedEnv } = createKafkaClient(process.env);
 
       expect(kafka).toBeDefined();
+      expect(validatedEnv.KAFKA_SASL_MECHANISM).toBe('scram-sha-256');
       // SASL будет сконфигурирован с механизмом scram-sha-256
     });
   });
@@ -114,10 +143,30 @@ describe('createKafkaClient', () => {
       process.env.KAFKA_CLIENT_ID = 'test-client';
       process.env.KAFKA_GROUP_ID = 'test-group';
 
-      const kafka = createKafkaClient(process.env);
+      const { kafka, validatedEnv } = createKafkaClient(process.env);
 
       expect(kafka).toBeDefined();
+      expect(validatedEnv.KAFKA_BROKERS).toBe('localhost:9092 , kafka2:9092');
       // Kafka client будет создан с обрезанными брокерами
+    });
+  });
+
+  describe('Extra process.env keys are ignored (passthrough)', () => {
+    it('должен игнорировать дополнительные ключи из process.env', () => {
+      process.env.KAFKA_BROKERS = 'localhost:9092';
+      process.env.KAFKA_CLIENT_ID = 'test-client';
+      process.env.KAFKA_GROUP_ID = 'test-group';
+      process.env.PATH = '/usr/bin';
+      process.env.HOME = '/home/user';
+      process.env.USER = 'testuser';
+
+      const { validatedEnv } = createKafkaClient(process.env);
+
+      // validatedEnv должен содержать только определённые ключи
+      expect(validatedEnv.KAFKA_BROKERS).toBe('localhost:9092');
+      expect(validatedEnv.KAFKA_CLIENT_ID).toBe('test-client');
+      expect(validatedEnv.KAFKA_GROUP_ID).toBe('test-group');
+      // PATH, HOME, USER не должны вызывать ошибку
     });
   });
 });
@@ -139,36 +188,37 @@ describe('createConsumer', () => {
 
   describe('Valid Kafka creates consumer with correct settings', () => {
     it('должен создать consumer с sessionTimeout: 300000', () => {
-      const kafka = createKafkaClient(process.env);
-      const consumer = createConsumer(kafka);
+      const { kafka, validatedEnv } = createKafkaClient(process.env);
+      const consumer = createConsumer(kafka, validatedEnv.KAFKA_GROUP_ID);
 
       expect(consumer).toBeDefined();
       // sessionTimeout будет проверен в интеграционных тестах
     });
 
     it('должен создать consumer с heartbeatInterval: 30000', () => {
-      const kafka = createKafkaClient(process.env);
-      const consumer = createConsumer(kafka);
+      const { kafka, validatedEnv } = createKafkaClient(process.env);
+      const consumer = createConsumer(kafka, validatedEnv.KAFKA_GROUP_ID);
 
       expect(consumer).toBeDefined();
       // heartbeatInterval будет проверен в интеграционных тестах
     });
 
-    it('должен использовать groupId из KAFKA_GROUP_ID env', () => {
-      process.env.KAFKA_GROUP_ID = 'my-custom-group';
-      const kafka = createKafkaClient(process.env);
-      const consumer = createConsumer(kafka);
+    it('должен использовать groupId из переданного параметра', () => {
+      const { kafka } = createKafkaClient(process.env);
+      const consumer = createConsumer(kafka, 'my-custom-group');
 
       expect(consumer).toBeDefined();
       // groupId будет проверен в интеграционных тестах
     });
 
-    it('должен создать consumer с autoCommit: false', () => {
-      const kafka = createKafkaClient(process.env);
-      const consumer = createConsumer(kafka);
+    it('должен выбросить ошибку при пустом groupId', () => {
+      const { kafka } = createKafkaClient(process.env);
+      expect(() => createConsumer(kafka, '')).toThrow('groupId is required');
+    });
 
-      expect(consumer).toBeDefined();
-      // autoCommit будет проверен в интеграционных тестах
+    it('должен выбросить ошибку при groupId только с пробелами', () => {
+      const { kafka } = createKafkaClient(process.env);
+      expect(() => createConsumer(kafka, '   ')).toThrow('groupId is required');
     });
   });
 });
@@ -189,7 +239,7 @@ describe('createDlqProducer', () => {
 
   describe('Valid Kafka creates DLQ producer', () => {
     it('должен создать отдельный producer для DLQ', () => {
-      const kafka = createKafkaClient(process.env);
+      const { kafka } = createKafkaClient(process.env);
       const producer = createDlqProducer(kafka);
 
       expect(producer).toBeDefined();

@@ -37,6 +37,9 @@ export KAFKA_DLQ_TOPIC="my-dlq-topic"
 
 # Optional - config file path (default: .opencode/kafka-router.json)
 export KAFKA_ROUTER_CONFIG=".opencode/kafka-router.json"
+
+# Optional - tombstone handling (default: false — tombstones sent to DLQ)
+export KAFKA_IGNORE_TOMBSTONES="false"
 ```
 
 ## Configuration File

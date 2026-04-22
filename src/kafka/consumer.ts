@@ -50,33 +50,44 @@ export type CommitOffsetsFn = (
 ) => Promise<void>;
 
 /**
+ * Состояние consumer для отслеживания метрик и shutdown (Constitution Principle IV: No-State Consumer).
+ */
+interface ConsumerState {
+  isShuttingDown: boolean;
+  totalMessagesProcessed: number;
+  dlqMessagesCount: number;
+  lastDlqRateLogTime: number;
+}
+
+/**
  * Логирует DLQ rate (NFR-010).
  *
  * Логирует процент сообщений, отправленных в DLQ, каждые DLQ_RATE_LOG_INTERVAL сообщений.
  *
+ * @param state - Состояние consumer с метриками
  * @returns void
  */
-function logDlqRate(): void {
+function logDlqRate(state: ConsumerState): void {
   const currentTime = Date.now();
-  const timeSinceLastLog = currentTime - lastDlqRateLogTime;
+  const timeSinceLastLog = currentTime - state.lastDlqRateLogTime;
 
   // Логируем каждые DLQ_RATE_LOG_INTERVAL сообщений
-  if (totalMessagesProcessed > 0 && totalMessagesProcessed % DLQ_RATE_LOG_INTERVAL === 0) {
-    const dlqRate = (dlqMessagesCount / totalMessagesProcessed) * 100;
+  if (state.totalMessagesProcessed > 0 && state.totalMessagesProcessed % DLQ_RATE_LOG_INTERVAL === 0) {
+    const dlqRate = (state.dlqMessagesCount / state.totalMessagesProcessed) * 100;
 
     console.log(
       JSON.stringify({
         level: 'info',
         event: 'dlq_rate',
-        totalMessages: totalMessagesProcessed,
-        dlqMessages: dlqMessagesCount,
+        totalMessages: state.totalMessagesProcessed,
+        dlqMessages: state.dlqMessagesCount,
         dlqRatePercent: dlqRate.toFixed(2),
         timeSinceLastLogMs: timeSinceLastLog,
         timestamp: new Date().toISOString(),
       }),
     );
 
-    lastDlqRateLogTime = currentTime;
+    state.lastDlqRateLogTime = currentTime;
   }
 }
 
@@ -123,6 +134,9 @@ function isBrokerThrottleError(error: unknown): boolean {
 
 /**
  * Выполняет операцию с retry логикой для broker throttle (NFR-012).
+ *
+ * ⚠️ Use ONLY for Kafka I/O operations (commitOffsets, producer.send).
+ * Do NOT use for pure functions — they cannot receive Kafka throttle errors.
  *
  * Если операция вызывает throttle ошибку, пауза 1s и retry до MAX_THROTTLE_RETRIES раз.
  * Если throttle сохраняется после всех retry, выбрасывает ошибку для обработки в DLQ.
@@ -206,8 +220,8 @@ async function executeWithThrottleRetry<T>(
  *
  * FR-023: parses message.value as JSON (throws → DLQ);
  *         validates message size (max 1MB, oversized → DLQ);
- *         calls matchRule() (throws → DLQ);
- *         calls buildPrompt() (throws → DLQ);
+ *         calls matchRuleV003() (throws → DLQ);
+ *         calls buildPromptV003() (throws → DLQ);
  *         logs matched rule name and prompt;
  *         commits offset on success;
  *         autoCommit: false — manual commitOffsets() after each message
@@ -221,6 +235,7 @@ async function executeWithThrottleRetry<T>(
  * @param config - Конфигурация плагина (PluginConfigV003)
  * @param dlqProducer - Producer для отправки в DLQ
  * @param commitOffsets - Функция для commit offsets из KafkaJS consumer
+ * @param state - Состояние consumer (Constitution Principle IV: No-State Consumer)
  * @returns Promise<void>
  *
  * @example
@@ -229,7 +244,8 @@ async function executeWithThrottleRetry<T>(
  *   { topic: 'test', partition: 0, message: { value: Buffer.from('{"test":1}'), ... } },
  *   config,
  *   dlqProducer,
- *   consumer.commitOffsets.bind(consumer)
+ *   consumer.commitOffsets.bind(consumer),
+ *   state
  * );
  * ```
  */
@@ -238,9 +254,10 @@ export async function eachMessageHandler(
   config: PluginConfigV003,
   dlqProducer: Producer,
   commitOffsets: CommitOffsetsFn,
+  state: ConsumerState,
 ): Promise<void> {
   // Проверяем состояние shutdown — если shutdown в процессе, не обрабатываем новые сообщения
-  if (isShuttingDown) {
+  if (state.isShuttingDown) {
     console.log(
       JSON.stringify({
         level: 'warn',
@@ -254,7 +271,7 @@ export async function eachMessageHandler(
   }
 
   // Увеличиваем счётчик сообщений
-  totalMessagesProcessed++;
+  state.totalMessagesProcessed++;
 
   // Логируем consumer lag metrics (NFR-010)
   logConsumerLagMetrics(payload);
@@ -265,15 +282,31 @@ export async function eachMessageHandler(
     // 1. Проверяем message value (null = tombstone)
     const messageValue = payload.message.value;
     if (messageValue === null) {
-      const error = new Error('Message value is null (tombstone)');
+      const ignoreTombstones = process.env.KAFKA_IGNORE_TOMBSTONES === 'true';
+      if (ignoreTombstones) {
+        console.log(
+          JSON.stringify({
+            level: 'info',
+            event: 'tombstone_ignored',
+            topic: payload.topic,
+            partition: payload.partition,
+            offset: payload.message.offset,
+            timestamp: new Date().toISOString(),
+          }),
+        );
+        await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]);
+        return;
+      }
+      // Default: отправляем tombstone в DLQ
+      const error = new Error('Message value is null (tombstone message)');
       await sendToDlq(dlqProducer, {
         value: null,
         topic: payload.topic,
         partition: payload.partition,
         offset: payload.message.offset,
       }, error);
-      dlqMessagesCount++;
-      logDlqRate();
+      state.dlqMessagesCount++;
+      logDlqRate(state);
       await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]);
       return;
     }
@@ -288,8 +321,8 @@ export async function eachMessageHandler(
         partition: payload.partition,
         offset: payload.message.offset,
       }, error);
-      dlqMessagesCount++;
-      logDlqRate();
+      state.dlqMessagesCount++;
+      logDlqRate(state);
       await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]);
       return;
     }
@@ -306,19 +339,16 @@ export async function eachMessageHandler(
         partition: payload.partition,
         offset: payload.message.offset,
       }, error);
-      dlqMessagesCount++;
-      logDlqRate();
+      state.dlqMessagesCount++;
+      logDlqRate(state);
       await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]);
       return;
     }
 
-    // 4. Вызываем matchRuleV003 (throws → DLQ) с throttle retry
+    // 4. Вызываем matchRuleV003 (throws → DLQ) — sync pure function
     let matchedRule: ReturnType<typeof matchRuleV003>;
     try {
-      matchedRule = await executeWithThrottleRetry(
-        () => matchRuleV003(parsedPayload, config.rules),
-        'matchRuleV003',
-      );
+      matchedRule = matchRuleV003(parsedPayload, config.rules);
     } catch (matchError) {
       const error = matchError instanceof Error ? matchError : new Error('Failed to match rule');
       await sendToDlq(dlqProducer, {
@@ -327,8 +357,8 @@ export async function eachMessageHandler(
         partition: payload.partition,
         offset: payload.message.offset,
       }, error);
-      dlqMessagesCount++;
-      logDlqRate();
+      state.dlqMessagesCount++;
+      logDlqRate(state);
       await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]);
       return;
     }
@@ -345,16 +375,13 @@ export async function eachMessageHandler(
           timestamp: new Date().toISOString(),
         }),
       );
-      logDlqRate();
+      logDlqRate(state);
       await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]);
       return;
     }
 
-    // 5. Вызываем buildPromptV003 (никогда не throws, возвращает fallback) с throttle retry
-    const prompt = await executeWithThrottleRetry(
-      () => buildPromptV003(matchedRule, parsedPayload),
-      'buildPromptV003',
-    );
+    // 5. Вызываем buildPromptV003 (никогда не throws, возвращает fallback) — sync pure function
+    const prompt = buildPromptV003(matchedRule, parsedPayload);
 
     // 6. Логируем matched rule name и prompt с processing time (NFR-010)
     const processingTime = Date.now() - startTime;
@@ -373,7 +400,7 @@ export async function eachMessageHandler(
     );
 
     // Логируем DLQ rate после успешной обработки
-    logDlqRate();
+    logDlqRate(state);
 
     // 7. Commit offset on success с throttle retry
     await executeWithThrottleRetry(
@@ -392,8 +419,8 @@ export async function eachMessageHandler(
       offset: payload.message.offset,
     }, dlqError);
 
-    dlqMessagesCount++;
-    logDlqRate();
+    state.dlqMessagesCount++;
+    logDlqRate(state);
 
     await executeWithThrottleRetry(
       () => commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset as string }]),
@@ -403,48 +430,37 @@ export async function eachMessageHandler(
 }
 
 /**
- * Переменные для отслеживания состояния shutdown.
- */
-let isShuttingDown = false;
-let shutdownInProgress: Promise<void> | null = null;
-
-/**
- * Переменные для отслеживания метрик (NFR-010).
- */
-let totalMessagesProcessed = 0;
-let dlqMessagesCount = 0;
-let lastDlqRateLogTime = Date.now();
-
-/**
  * Выполняет graceful shutdown для consumer и producer.
  *
  * SIGTERM/SIGINT → consumer.disconnect() → producer.disconnect().
- * Shutdown timeout: 10 секунд (force-kill after timeout).
+ * Single timeout: 10 секунд для всего процесса shutdown (force-kill after timeout).
  * SIGTERM во время DLQ send: завершается отправка, затем disconnect.
  * Последовательность логируется.
  *
  * FR-026: SIGTERM/SIGINT → consumer.disconnect() → producer.disconnect();
- *         Shutdown timeout: 10 seconds (force-kill after timeout);
+ *         Single timeout: 10 seconds (force-kill after timeout);
  *         SIGTERM during DLQ send: complete it, then disconnect;
  *         Sequence logged
  *
  * @param consumer - Kafka consumer для отключения
  * @param producer - Kafka producer для отключения
  * @param signal - Сигнал shutdown ('SIGTERM' или 'SIGINT')
+ * @param state - Состояние consumer (Constitution Principle IV: No-State Consumer)
  * @returns Promise<void>
  *
  * @example
  * ```ts
- * await performGracefulShutdown(consumer, dlqProducer, 'SIGTERM');
+ * await performGracefulShutdown(consumer, dlqProducer, 'SIGTERM', state);
  * ```
  */
 async function performGracefulShutdown(
   consumer: Consumer,
   producer: Producer,
   signal: string,
+  state: ConsumerState,
 ): Promise<void> {
   // Защита от повторных вызовов
-  if (isShuttingDown) {
+  if (state.isShuttingDown) {
     console.log(
       JSON.stringify({
         level: 'warn',
@@ -453,10 +469,10 @@ async function performGracefulShutdown(
         timestamp: new Date().toISOString(),
       }),
     );
-    return shutdownInProgress || Promise.resolve();
+    return Promise.resolve();
   }
 
-  isShuttingDown = true;
+  state.isShuttingDown = true;
 
   console.log(
     JSON.stringify({
@@ -473,7 +489,7 @@ async function performGracefulShutdown(
     // Создаем Promise для graceful shutdown с timeout
     const shutdownPromise = (async () => {
       try {
-        // 1. Disconnect consumer (с таймаутом 5 секунд)
+        // 1. Disconnect consumer
         console.log(
           JSON.stringify({
             level: 'info',
@@ -482,12 +498,7 @@ async function performGracefulShutdown(
           }),
         );
 
-        await Promise.race([
-          consumer.disconnect(),
-          new Promise<void>((_, reject) =>
-            setTimeout(() => reject(new Error('consumer.disconnect() timeout')), 5000),
-          ),
-        ]);
+        await consumer.disconnect();
 
         console.log(
           JSON.stringify({
@@ -509,7 +520,7 @@ async function performGracefulShutdown(
       }
 
       try {
-        // 2. Disconnect producer (с таймаутом 5 секунд)
+        // 2. Disconnect producer
         console.log(
           JSON.stringify({
             level: 'info',
@@ -518,12 +529,7 @@ async function performGracefulShutdown(
           }),
         );
 
-        await Promise.race([
-          producer.disconnect(),
-          new Promise<void>((_, reject) =>
-            setTimeout(() => reject(new Error('producer.disconnect() timeout')), 5000),
-          ),
-        ]);
+        await producer.disconnect();
 
         console.log(
           JSON.stringify({
@@ -632,8 +638,16 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
   // 3. Создаем DLQ producer (FR-021)
   const dlqProducer = createDlqProducer(kafka);
 
+  // 4. Создаем состояние consumer (Constitution Principle IV: No-State Consumer)
+  const state: ConsumerState = {
+    isShuttingDown: false,
+    totalMessagesProcessed: 0,
+    dlqMessagesCount: 0,
+    lastDlqRateLogTime: Date.now(),
+  };
+
   try {
-    // 4. Подключаем consumer и producer
+    // 5. Подключаем consumer и producer
     await consumer.connect();
     console.log(
       JSON.stringify({
@@ -652,7 +666,7 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
       }),
     );
 
-    // 5. Подписываемся на все топики из конфигурации
+    // 6. Подписываемся на все топики из конфигурации
     await consumer.subscribe({ topics: config.topics });
     console.log(
       JSON.stringify({
@@ -663,7 +677,7 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
       }),
     );
 
-    // 6. Регистрируем SIGTERM/SIGINT handlers для graceful shutdown
+    // 7. Регистрируем SIGTERM/SIGINT handlers для graceful shutdown
     const shutdownHandler = async (signal: NodeJS.Signals) => {
       console.log(
         JSON.stringify({
@@ -675,7 +689,7 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
       );
 
       // Выполняем graceful shutdown
-      await performGracefulShutdown(consumer, dlqProducer, signal);
+      await performGracefulShutdown(consumer, dlqProducer, signal, state);
 
       // Выходим из процесса после успешного shutdown
       process.exit(0);
@@ -684,6 +698,7 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
     process.on('SIGTERM', shutdownHandler);
     process.on('SIGINT', shutdownHandler);
 
+    // 8. Логируем что consumer запущен
     console.log(
       JSON.stringify({
         level: 'info',
@@ -693,14 +708,30 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
       }),
     );
 
-    // 7. Запускаем consumer с eachMessage handler (FR-023)
-    await consumer.run({
+    // 9. Запускаем consumer с eachMessage handler (FR-023)
+    // consumer.run() никогда не resolve — запускаем без await
+    consumer.run({
+      autoCommit: false, // Required: manual offset commit via commitOffsets()
       eachMessage: async (payload: EachMessagePayload) => {
-        await eachMessageHandler(payload, config, dlqProducer, consumer.commitOffsets.bind(consumer));
+        await eachMessageHandler(payload, config, dlqProducer, consumer.commitOffsets.bind(consumer), state);
       },
+    }).catch((error) => {
+      // Фатальная ошибка в run loop — пытаемся выполнить graceful shutdown
+      console.error(
+        JSON.stringify({
+          level: 'error',
+          event: 'consumer_run_loop_error',
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        }),
+      );
+
+      // Выполняем graceful shutdown при ошибке
+      performGracefulShutdown(consumer, dlqProducer, 'ERROR', state).finally(() => process.exit(1));
     });
 
-    // consumer.run() никогда не resolve, поэтому эта строка недостижима в нормальном режиме
+    // startConsumer() возвращает здесь после успешной инициализации
+    // Consumer продолжает работать в фоновом режиме
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -714,7 +745,7 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
     );
 
     // Graceful shutdown даже в случае ошибки
-    await performGracefulShutdown(consumer, dlqProducer, 'ERROR');
+    await performGracefulShutdown(consumer, dlqProducer, 'ERROR', state);
 
     process.exit(1);
   }

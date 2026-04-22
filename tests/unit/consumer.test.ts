@@ -3,10 +3,20 @@
  * @fileoverview Tests for sequential message processing with DLQ support
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
 import type { PluginConfigV003, RuleV003 } from '../../src/schemas/index.js';
 import type { Producer } from 'kafkajs';
+
+/**
+ * Mock состояние consumer для тестов (Constitution Principle IV: No-State Consumer)
+ */
+interface MockConsumerState {
+  isShuttingDown: boolean;
+  totalMessagesProcessed: number;
+  dlqMessagesCount: number;
+  lastDlqRateLogTime: number;
+}
 
 // Mock для sendToDlq
 vi.mock('../../src/kafka/dlq.js', () => ({
@@ -20,6 +30,7 @@ describe('eachMessageHandler', () => {
   let mockDlqProducer: Producer;
   let mockCommitOffsets: ReturnType<typeof vi.fn>;
   let mockConfig: PluginConfigV003;
+  let mockState: MockConsumerState;
   let rules: RuleV003[];
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 
@@ -27,6 +38,12 @@ describe('eachMessageHandler', () => {
     // Setup mocks
     mockDlqProducer = {} as Producer;
     mockCommitOffsets = vi.fn().mockResolvedValue(undefined);
+    mockState = {
+      isShuttingDown: false,
+      totalMessagesProcessed: 0,
+      dlqMessagesCount: 0,
+      lastDlqRateLogTime: Date.now(),
+    };
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     // Setup config with one matching rule
@@ -65,7 +82,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify commitOffsets was called
       expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
@@ -92,7 +109,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify sendToDlq was called
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -121,7 +138,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify sendToDlq was called
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -148,7 +165,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify sendToDlq was called
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -178,7 +195,7 @@ describe('eachMessageHandler', () => {
       };
 
       // Этот тест фокусируется на проверке размера, поэтому мы игнорируем ошибку JSON parse
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify sendToDlq was called (из-за JSON parse error, но НЕ из-за размера)
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -208,7 +225,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify sendToDlq был вызван
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -237,7 +254,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify sendToDlq был вызван (из-за ошибки в commitOffsets)
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -272,7 +289,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify console.log was called with "message_processed"
       expect(consoleLogSpy).toHaveBeenCalled();
@@ -332,7 +349,7 @@ describe('eachMessageHandler', () => {
 
       // Обрабатываем все сообщения
       for (const payload of payloads) {
-        await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+        await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
       }
 
       // Verify each message was processed independently
@@ -379,7 +396,7 @@ describe('eachMessageHandler', () => {
 
       // Обрабатываем сообщения последовательно
       for (const payload of payloads) {
-        await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+        await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
       }
 
       // Проверяем, что все сообщения обработаны
@@ -412,7 +429,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify sendToDlq was called (tombstone → DLQ)
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -448,7 +465,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify console.log was called with "no_rule_matched"
       expect(consoleLogSpy).toHaveBeenCalled();
@@ -477,7 +494,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Verify console.log was called with "message_processed"
       expect(consoleLogSpy).toHaveBeenCalled();

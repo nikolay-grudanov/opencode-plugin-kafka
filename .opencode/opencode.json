@@ -3,10 +3,111 @@
   "instructions": [".opencode/rules/*.md"],
   "agent": {
     "general": {
-      "model": "zai-coding-plan/glm-4.7"
+      "model": "lemonade/extra.Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-GGUF"
     },
     "explore": {
-      "model": "zai-coding-plan/glm-4.7"
+      "model": "lemonade/extra.Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-GGUF"
+    },
+    "code-executor": {
+      "description": "Основной исполнитель кода в экосистеме OpenCode. Пишет код, выполняет задачи, работает с файлами и репозиторием напрямую.",
+      "mode": "subagent",
+      "model": "lemonade/extra.Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-GGUF",
+      "promt": "{file:agents/code-executor.md}",
+      "temperature": 0.7,
+      "permission": {
+        "todowrite": "allow",
+        "bash": {
+          "npm run *": "allow",
+          "npx vitest *": "allow",
+          "npx *": "allow",
+          "*": "deny"
+        },
+        "edit": "allow",
+        "task": {
+          "kafka-test-orchestrator": "deny",
+          "kafka-constitution-*": "deny"
+        }
+      }
+    },
+    "architect": {
+      "description": "Системный архитектор. Проектирует архитектуру, анализирует tradeoffs, предлагает паттерны и решения.",
+      "mode": "subagent",
+      "model": "minimax-coding-plan/MiniMax-M2.5",
+      "promt": "{file:agents/architect.md}",
+      "temperature": 0.4,
+      "permission": {
+        "todowrite": "allow",
+        "bash": {
+          "grep *": "allow",
+          "find *": "allow",
+          "ls *": "allow",
+          "*": "deny"
+        },
+        "edit": "ask",
+        "task": {
+          "code-*": "allow",
+          "security-*": "allow",
+          "qa-*": "allow"
+        }
+      }
+    },
+    "security-reviewer": {
+      "description": "Агент по безопасности. Проводит security audit, анализ уязвимостей, проверки прав доступа.",
+      "mode": "subagent",
+      "model": "zai-coding-plan/glm-4.7",
+      "promt": "{file:agents/security-reviewer.md}",
+      "temperature": 0.6,
+      "permission": {
+        "todowrite": "allow",
+        "bash": {
+          "npm audit *": "allow",
+          "npx *": "allow",
+          "grep *": "allow",
+          "*": "deny"
+        },
+        "edit": "deny",
+        "webfetch": "ask"
+      }
+    },
+    "documentation-agent": {
+      "description": "Документационный агент. Пишет документацию, README, API docs, генерирует changelog.",
+      "mode": "subagent",
+      "model": "minimax-coding-plan/MiniMax-M2.5",
+      "promt": "{file:agents/documentation-agent.md}",
+      "temperature": 0.7,
+      "permission": {
+        "todowrite": "allow",
+        "bash": {
+          "grep *": "allow",
+          "ls *": "allow",
+          "npx typedoc *": "allow",
+          "*": "deny"
+        },
+        "edit": "allow",
+        "task": {
+          "code-*": "allow"
+        }
+      }
+    },
+    "qa-engineer": {
+      "description": "QA-инженер. Проектирует test strategy, пишет test cases, анализирует bug reports.",
+      "mode": "subagent",
+      "promt": "{file:agents/qa-engineer.md}",
+      "temperature": 0.4,
+      "permission": {
+        "todowrite": "allow",
+        "bash": {
+          "grep *": "allow",
+          "npx vitest --coverage *": "allow",
+          "ls *": "allow",
+          "*": "deny"
+        },
+        "edit": "ask",
+        "task": {
+          "kafka-test-orchestrator": "allow",
+          "code-*": "allow"
+        }
+      }
     }
   },
   "mcp": {

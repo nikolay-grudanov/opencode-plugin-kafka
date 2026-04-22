@@ -2,7 +2,7 @@
 name: opencode-plugin-js
 description: Создает, исправляет, рефакторит и проектирует плагины OpenCode, hook-based расширения, custom tools и архитектуру плагинов.
 mode: subagent
-model: zai-coding-plan/glm-4.7
+model: minimax-coding-plan/MiniMax-M2.5
 temperature: 0.3
 tools:
     "*": true

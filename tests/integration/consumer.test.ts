@@ -18,6 +18,16 @@ import type { PluginConfigV003 } from '../../src/schemas/index.js';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
 
 /**
+ * Mock состояние consumer для тестов (Constitution Principle IV: No-State Consumer)
+ */
+interface MockConsumerState {
+  isShuttingDown: boolean;
+  totalMessagesProcessed: number;
+  dlqMessagesCount: number;
+  lastDlqRateLogTime: number;
+}
+
+/**
  * Mock контейнер для интеграционных тестов (fallback когда Docker недоступен)
  */
 class MockStartedTestContainer implements StartedTestContainer {
@@ -206,6 +216,14 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         error?: string;
       }> = [];
 
+      // Создаем mock state для теста
+      const mockState: MockConsumerState = {
+        isShuttingDown: false,
+        totalMessagesProcessed: 0,
+        dlqMessagesCount: 0,
+        lastDlqRateLogTime: Date.now(),
+      };
+
       // Step 3: Запускаем consumer
       const consumerRunPromise = consumer.run({
         eachMessage: async (payload) => {
@@ -229,6 +247,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
               testConfig,
               dlqProducer!,
               consumer!.commitOffsets.bind(consumer!),
+              mockState,
             );
 
             // Проверяем console.log для определения результата
@@ -373,6 +392,14 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
       const messageCount = 3;
       const totalExpectedTimeMs = messageCount * messageDelayMs;
 
+      // Создаем mock state для теста
+      const mockState: MockConsumerState = {
+        isShuttingDown: false,
+        totalMessagesProcessed: 0,
+        dlqMessagesCount: 0,
+        lastDlqRateLogTime: Date.now(),
+      };
+
       // Mock console.time/log для измерения времени обработки
       const processingTimes: number[] = [];
 
@@ -414,6 +441,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
               testConfig,
               dlqProducer!,
               consumer!.commitOffsets.bind(consumer!),
+              mockState,
             );
 
             // Логируем время обработки
@@ -512,6 +540,14 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         send: vi.fn().mockResolvedValue(undefined),
       } as unknown as Producer;
 
+      // Создаем mock state для теста
+      const mockState: MockConsumerState = {
+        isShuttingDown: false,
+        totalMessagesProcessed: 0,
+        dlqMessagesCount: 0,
+        lastDlqRateLogTime: Date.now(),
+      };
+
       // Создаём test payload с matching rule
       const payload = {
         topic: testTopic,
@@ -530,7 +566,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
       };
 
       // Вызываем eachMessageHandler
-      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Проверяем что commitOffsets был вызван (успешная обработка)
       expect(mockCommitOffsets).toHaveBeenCalledWith([
@@ -573,6 +609,14 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         send: vi.fn().mockResolvedValue(undefined),
       } as unknown as Producer;
 
+      // Создаем mock state для теста
+      const mockState: MockConsumerState = {
+        isShuttingDown: false,
+        totalMessagesProcessed: 0,
+        dlqMessagesCount: 0,
+        lastDlqRateLogTime: Date.now(),
+      };
+
       // Создаём test payload БЕЗ matching rule
       const payload = {
         topic: testTopic,
@@ -591,7 +635,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
       };
 
       // Вызываем eachMessageHandler
-      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Проверяем что commitOffsets был вызван (no error)
       expect(mockCommitOffsets).toHaveBeenCalledWith([
@@ -635,6 +679,14 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         send: vi.fn().mockResolvedValue(undefined),
       } as unknown as Producer;
 
+      // Создаем mock state для теста
+      const mockState: MockConsumerState = {
+        isShuttingDown: false,
+        totalMessagesProcessed: 0,
+        dlqMessagesCount: 0,
+        lastDlqRateLogTime: Date.now(),
+      };
+
       // Создаём test payload с invalid JSON
       const payload = {
         topic: testTopic,
@@ -649,7 +701,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
       };
 
       // Вызываем eachMessageHandler
-      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Проверяем что DLQ был вызван (invalid JSON → DLQ)
       expect(mockDlqProducer.send).toHaveBeenCalled();
@@ -694,6 +746,14 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         send: vi.fn().mockResolvedValue(undefined),
       } as unknown as Producer;
 
+      // Создаем mock state для теста
+      const mockState: MockConsumerState = {
+        isShuttingDown: false,
+        totalMessagesProcessed: 0,
+        dlqMessagesCount: 0,
+        lastDlqRateLogTime: Date.now(),
+      };
+
       // Создаём test payload с null value (tombstone)
       const payload = {
         topic: testTopic,
@@ -708,7 +768,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
       };
 
       // Вызываем eachMessageHandler
-      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets);
+      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState);
 
       // Проверяем что DLQ был вызван (tombstone → DLQ)
       expect(mockDlqProducer.send).toHaveBeenCalled();

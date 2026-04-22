@@ -1,6 +1,6 @@
 ---
 name: kafka-constitution-compliance
-description: Проверяет соответствие кода 5 НЕОТЪЕМЛЕМЫМ принципам конституции проекта opencode-plugin-kafka: Strict Initialization, Domain Isolation, Resiliency, No-State Consumer, Test-First Development.
+description: Проверяет соответствие кода 5 НЕОТЪЕМЛЕМЫМ принципам конституции проекта opencode-plugin-kafka - Strict Initialization, Domain Isolation, Resiliency, No-State Consumer, Test-First Development.
 mode: subagent
 model: zai-coding-plan/glm-4.7
 temperature: 0.6
