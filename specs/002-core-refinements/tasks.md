@@ -29,19 +29,19 @@
 
 ### Implementation for User Story 1
 
-- [ ] T004 [US1] Add type exports to src/schemas/index.ts: `export type Rule = z.infer<typeof RuleSchema>`
-- [ ] T005 [US1] Add type exports to src/schemas/index.ts: `export type PluginConfig = z.infer<typeof PluginConfigSchema>`
-- [ ] T006 [US1] Add type exports to src/schemas/index.ts: `export type Payload = unknown`
-- [ ] T007 [US1] Remove re-export from types.ts in src/schemas/index.ts
-- [ ] T008 [P] [US1] Add TypeScript-comparison test to verify z.infer<> types are identical to manual types using ExpectType from @tsd (SC-008)
-- [ ] T009 [P] [US1] Update imports in src/core/config.ts: `from './types.js'` → `from '../schemas/index.js'`
-- [ ] T010 [P] [US1] Update imports in src/core/prompt.ts: `from './types.js'` → `from '../schemas/index.js'`
-- [ ] T011 [P] [US1] Update imports in src/core/routing.ts (find all type imports)
-- [ ] T012 [P] [US1] Update imports in src/index.ts (find all type imports)
-- [ ] T013 [P] [US1] Update imports in tests/ (find all imports from '../core/types' or '../../core/types')
-- [ ] T014 [US1] Verify TypeScript compilation: `npx tsc --noEmit` — должны пройти без ошибок
-- [ ] T015 [US1] Run tests to verify no regressions: `npm test`
-- [ ] T016 [US1] Delete src/core/types.ts (FR-012)
+- [X] T004 [US1] Add type exports to src/schemas/index.ts: `export type Rule = z.infer<typeof RuleSchema>`
+- [X] T005 [US1] Add type exports to src/schemas/index.ts: `export type PluginConfig = z.infer<typeof PluginConfigSchema>`
+- [X] T006 [US1] Add type exports to src/schemas/index.ts: `export type Payload = unknown`
+- [X] T007 [US1] Remove re-export from types.ts in src/schemas/index.ts
+- [X] T008 [P] [US1] Add TypeScript-comparison test to verify z.infer<> types are identical to manual types using ExpectType from @tsd (SC-008)
+- [X] T009 [P] [US1] Update imports in src/core/config.ts: `from './types.js'` → `from '../schemas/index.js'`
+- [X] T010 [P] [US1] Update imports in src/core/prompt.ts: `from './types.js'` → `from '../schemas/index.js'`
+- [X] T011 [P] [US1] Update imports in src/core/routing.ts (find all type imports)
+- [X] T012 [P] [US1] Update imports in src/index.ts (find all type imports)
+- [X] T013 [P] [US1] Update imports in tests/ (find all imports from '../core/types' or '../../core/types')
+- [X] T014 [US1] Verify TypeScript compilation: `npx tsc --noEmit` — должны пройти без ошибок
+- [X] T015 [US1] Run tests to verify no regressions: `npm test`
+- [X] T016 [US1] Delete src/core/types.ts (FR-012)
 
 **Checkpoint**: US1 complete — types.ts удалён, все типы из schemas, tsc проходит, тесты проходят
 
@@ -55,7 +55,7 @@
 
 ### Implementation for User Story 2
 
-- [ ] T017 [P] [US2] Add unit tests for buildPrompt primitives in tests/unit/prompt.test.ts
+- [X] T017 [P] [US2] Add unit tests for buildPrompt primitives in tests/unit/prompt.test.ts
   - Test: number 42 → "42"
   - Test: number 0 → "0"
   - Test: boolean true → "true"
@@ -63,10 +63,10 @@
   - Test: BigInt → "42"
   - Test: empty string "" → ""
   - Test: null → fallback
-- [ ] T018 [US2] Fix src/core/prompt.ts: change primitive handling from fallback to String(extracted)
+- [X] T018 [US2] Fix src/core/prompt.ts: change primitive handling from fallback to String(extracted)
   - Lines 59-62: replace `return FALLBACK_PROMPT` with string conversion for number/boolean/bigint
-- [ ] T019 [US2] Run unit tests: `npm test -- tests/unit/prompt.test.ts` — verify all pass
-- [ ] T020 [US2] Run full test suite: `npm test` — verify no regressions
+- [X] T019 [US2] Run unit tests: `npm test -- tests/unit/prompt.test.ts` — verify all pass
+- [X] T020 [US2] Run full test suite: `npm test` — verify no regressions
 
 **Checkpoint**: US2 complete — buildPrompt корректно обрабатывает примитивы, все тесты проходят
 
@@ -80,16 +80,16 @@
 
 ### Implementation for User Story 3
 
-- [ ] T021 [P] [US3] Add unit tests for topic coverage validation in tests/unit/config.test.ts
+- [X] T021 [P] [US3] Add unit tests for topic coverage validation in tests/unit/config.test.ts
   - Test: topics ["a"] with rule for "a" → no error
   - Test: topics ["a", "b"] with rule only for "a" → Error "Topics without rules: b"
   - Test: topics ["security"] with rule for "other-topic" → Error "Topics without rules: security"
-- [ ] T022 [US3] Implement topic coverage check in src/core/config.ts after Zod validation
+- [X] T022 [US3] Implement topic coverage check in src/core/config.ts after Zod validation
   - Add Set creation from rules.map(r => r.topic)
   - Filter config.topics for uncovered topics
   - Throw Error with "Topics without rules: ..." message if uncovered exist
-- [ ] T023 [US3] Run unit tests: `npm test -- tests/unit/config.test.ts` — verify all pass
-- [ ] T024 [US3] Run full test suite: `npm test` — verify no regressions
+- [X] T023 [US3] Run unit tests: `npm test -- tests/unit/config.test.ts` — verify all pass
+- [X] T024 [US3] Run full test suite: `npm test` — verify no regressions
 
 **Checkpoint**: US3 complete — parseConfig валидирует покрытие топиков, все тесты проходят
 
@@ -99,10 +99,10 @@
 
 **Purpose**: Final verification and documentation
 
-- [ ] T025 [P] Run full test suite with coverage: `npm test -- --coverage`
-- [ ] T026 [P] Verify ≥ 90% coverage on routing and parsing logic (SC-011)
-- [ ] T027 Update quickstart.md if needed for type import changes (not needed — quickstart.md already reflects all changes)
-- [ ] T028 Run `npm test` — final verification all tests pass
+- [X] T025 [P] Run full test suite with coverage: `npm test -- --coverage`
+- [X] T026 [P] Verify ≥ 90% coverage on routing and parsing logic (SC-011)
+- [X] T027 Update quickstart.md if needed for type import changes (not needed — quickstart.md already reflects all changes)
+- [X] T028 Run `npm test` — final verification all tests pass
 
 ---
 
