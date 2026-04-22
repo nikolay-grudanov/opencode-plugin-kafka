@@ -2,7 +2,7 @@
 name: opencode-plugin-reviewer
 description: Проверяет JavaScript/TypeScript плагины OpenCode, созданные через opencode-plugin-js, на соответствие архитектуре, API design, lifecycle hooks, разрешениям, безопасности, DX и конвенциям OpenCode перед следующей итерацией.
 mode: subagent
-model: minimax-coding-plan/MiniMax-M2.5
+model: zai-coding-plan/glm-4.7
 temperature: 0.6
 tools:
   "*": false
@@ -13,6 +13,7 @@ tools:
   opencode-docs: true
 permission:
   edit: deny
+  todowrite: allow
 bash:
     "*": deny
     "grep *": allow

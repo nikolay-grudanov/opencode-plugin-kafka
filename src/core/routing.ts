@@ -4,30 +4,52 @@
  */
 
 import { JSONPath } from 'jsonpath-plus';
-import type { Rule, Payload } from '../schemas/index.js';
+import type { RuleV003, Payload } from '../schemas/index.js';
 
 /**
- * Находит первое подходящее правило для payload и topic.
+ * Находит первое подходящее правило для payload (spec 003 — JSONPath routing).
+ *
+ * Использует RuleV003 с полем jsonPath для фильтрации сообщений.
+ * Вызывающий код должен передать все правила для проверки.
  *
  * @param payload - JSON-объект сообщения из Kafka
- * @param topic - имя Kafka topic
- * @param rules - массив правил для проверки
- * @returns первое правило, удовлетворяющее условию, или null если ни одно не подошло
+ * @param rules - массив правил RuleV003 для проверки
+ * @returns первое правило RuleV003, удовлетворяющее jsonPath, или null если ни одно не подошло
  *
  * @example
  * ```ts
+ * // Пример 1: Rule с совпадающим jsonPath
  * const message = { vulnerabilities: [{ severity: 'CRITICAL' }] };
  * const rules = [{
  *   name: 'critical',
- *   topic: 'security',
- *   agent: 'security-agent',
- *   condition: '$.vulnerabilities[?(@.severity=="CRITICAL")]'
+ *   jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]',
+ *   promptTemplate: 'Analyze: ${$.vulnerabilities}'
  * }];
- * const matched = matchRule(message, 'security', rules);
- * // matched: Rule { name: 'critical', ... }
+ * const matched = matchRuleV003(message, rules);
+ * // matched: RuleV003 { name: 'critical', ... }
+ *
+ * // Пример 2: Catch-all правило (jsonPath: '$')
+ * const message = { anything: 'goes' };
+ * const rules = [{
+ *   name: 'catch-all',
+ *   jsonPath: '$',
+ *   promptTemplate: 'Process: ${$}'
+ * }];
+ * const matched = matchRuleV003(message, rules);
+ * // matched: RuleV003 { name: 'catch-all', ... }
+ *
+ * // Пример 3: Нет совпадений
+ * const message = { status: 'LOW' };
+ * const rules = [{
+ *   name: 'critical',
+ *   jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]',
+ *   promptTemplate: 'Critical vuln: ${$}'
+ * }];
+ * const matched = matchRuleV003(message, rules);
+ * // matched: null
  * ```
  */
-export function matchRule(payload: Payload, topic: string, rules: Rule[]): Rule | null {
+export function matchRuleV003(payload: Payload, rules: RuleV003[]): RuleV003 | null {
   // Edge case: null/undefined payload
   if (payload === null || payload === undefined) {
     return null;
@@ -38,23 +60,10 @@ export function matchRule(payload: Payload, topic: string, rules: Rule[]): Rule 
     return null;
   }
 
-  // Фильтрация по topic
-  const filteredRules = rules.filter((rule) => rule.topic === topic);
-
-  // Если нет правил для этого topic
-  if (filteredRules.length === 0) {
-    return null;
-  }
-
   // Проверка каждого правила в порядке
-  for (const rule of filteredRules) {
-    // Если нет condition → catch-all, совпадает
-    if (!rule.condition) {
-      return rule;
-    }
-
-    // Если есть condition → используем JSONPath
-    const results = JSONPath({ path: rule.condition, json: payload });
+  for (const rule of rules) {
+    // Выполняем JSONPath запрос
+    const results = JSONPath({ path: rule.jsonPath, json: payload });
 
     // Если results не пустой → совпадение
     if (results && results.length > 0) {

@@ -2,10 +2,16 @@
 name: kafka-test-orchestrator
 description: Координирует test-first разработку проекта opencode-plugin-kafka с Vitest, testcontainers-node и Redpanda, обеспечивая 90%+ покрытие кода для routing и message parsing logic.
 mode: subagent
-model: zai-coding-plan/glm-4.7
+model: minimax-coding-plan/MiniMax-M2.7
 temperature: 0.7
 permission:
   "*": allow
+  todowrite: allow
+  task:
+    "*": "deny"
+    "code-*": "allow"
+    "qa*": "allow"
+    "general": "allow"
 ---
 
 # Роль агента
