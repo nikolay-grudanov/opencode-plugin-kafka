@@ -86,3 +86,23 @@ import type { Rule } from '../core/types'; // ← НЕ СУЩЕСТВУЕТ
 
 ## Recent Changes
 - 003-kafka-consumer: Added TypeScript 6.x (ES2022 target, ESNext modules, `moduleResolution: bundler`) + `kafkajs` (Kafka client), `zod` (runtime validation), `jsonpath-plus` (JSONPath queries), `vitest` (testing), `testcontainers-node` + `Redpanda` (integration tests)
+
+## Known Issues & Technical Debt
+
+### Coverage 57.37% — требуются integration tests с real Redpanda
+
+**Проблема**: `src/kafka/consumer.ts` имеет покрытие 39.82% из-за сложной логики с Kafka API.
+
+**Текущее состояние**:
+- Unit tests для pure functions (routing, prompt, dlq) — 100% coverage ✅
+- `consumer.ts` требует integration tests с реальным Redpanda контейнером
+- Unit tests для consumer.ts невозможны без моков Kafka API
+
+**Требуется**:
+1. Integration tests с real Redpanda для `consumer.ts` (eachMessageHandler, graceful shutdown)
+2. CI/CD environment с Docker/Podman для запуска Redpanda
+3. Или исключение `consumer.ts` из coverage threshold
+
+**Файлы требующие coverage**:
+- `src/kafka/consumer.ts` — 39.82% (каждая строка требует integration test)
+- `src/core/config.ts` — 59.18% (parseConfigV003 FR-017 validation)
