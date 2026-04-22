@@ -25,7 +25,7 @@ export const PluginConfigSchema = z.object({
 });
 
 /**
- * TypeScript types inferred from Zod schemas
+ * TypeScript types for configuration objects.
+ * Импортируются из core/types.ts для единого источника истины.
  */
-export type PluginConfig = z.infer<typeof PluginConfigSchema>;
-export type Rule = z.infer<typeof RuleSchema>;
+export type { Rule, PluginConfig } from '../core/types.js';

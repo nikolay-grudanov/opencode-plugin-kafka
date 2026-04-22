@@ -142,7 +142,7 @@ tests/
 
 ```typescript
 // parseConfig: валидация JSON → typed config или ZodError
-parseConfig(raw: unknown): PluginConfig  // throws ZodError on invalid
+parseConfig(rawJson: unknown): PluginConfig  // throws ZodError on invalid
 
 // matchRule: поиск первого matching rule для payload + topic
 matchRule(payload: unknown, topic: string, rules: Rule[]): Rule | null

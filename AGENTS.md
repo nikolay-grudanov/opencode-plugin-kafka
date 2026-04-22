@@ -26,4 +26,12 @@ TypeScript 5.x: Follow standard conventions
 - 001-new-specification: Added TypeScript 5.x + `zod` (runtime validation), `jsonpath-plus` (JSONPath queries), `vitest` (testing)
 
 <!-- MANUAL ADDITIONS START -->
+## Checklists
+
+- **podman.md** (Phase 7 only): Podman setup requirements для Integration Tests. Игнорировать до Phase 7.
+
+## Phase Execution
+
+- **Phase 1-6**: Выполнять без проверки podman.md
+- **Phase 7**: Проверить podman.md перед Integration Tests
 <!-- MANUAL ADDITIONS END -->

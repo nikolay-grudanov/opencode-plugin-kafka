@@ -13,6 +13,7 @@ import type { PluginConfig } from './types';
  * @throws {ZodError} If configuration is invalid
  */
 export function parseConfig(rawJson: unknown): PluginConfig {
-  // TDD: This is a stub that will fail tests
-  throw new Error('Not implemented yet');
+  // Используем Zod schema для валидации конфигурации
+  // Zod выбросит ZodError если конфигурация невалидна
+  return PluginConfigSchema.parse(rawJson);
 }
