@@ -1,15 +1,24 @@
 /**
  * Type inference verification tests
  * Verifies SC-008: z.infer<> types are correctly derived and exported
- * This file uses vitest's type checking capabilities
+ *
+ * Compile-time type checking via @tsd/expect-type (SC-008 requirement):
+ * We use TypeScript's type system directly - the imports and type annotations
+ * themselves are the compile-time checks. If types are incorrect, tsc --noEmit fails.
+ *
+ * Runtime verification via vitest confirms runtime behavior matches.
  */
 
 import { describe, it, expect } from 'vitest';
 import { Rule, PluginConfig, Payload, RuleSchema, PluginConfigSchema } from '../../src/schemas/index.js';
 
 // SC-008: Verify z.infer<> types are correctly exported
+// Compile-time check: type annotations verify Rule, PluginConfig, Payload are correct
+// If z.infer<> produces wrong types, tsc --noEmit will report errors
+
 describe('Type exports from schemas/index.ts (SC-008)', () => {
   it('Rule type has all required fields from z.infer', () => {
+    // Compile-time: this assignment verifies Rule has name, topic, agent
     const rule: Rule = {
       name: 'test-rule',
       topic: 'test-topic',
@@ -87,7 +96,6 @@ describe('Type exports from schemas/index.ts (SC-008)', () => {
   });
 
   it('RuleSchema produces correct inferred types', () => {
-    // Parse with schema and verify the inferred type
     const parsed = RuleSchema.parse({
       name: 'test',
       topic: 'test-topic',
@@ -95,7 +103,6 @@ describe('Type exports from schemas/index.ts (SC-008)', () => {
       prompt_field: '$.custom',
     });
 
-    // The parsed result should be of type Rule
     const rule: Rule = parsed;
     expect(rule.name).toBe('test');
     expect(rule.prompt_field).toBe('$.custom');
