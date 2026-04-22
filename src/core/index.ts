@@ -5,7 +5,8 @@
  * @see plan.md § Project Structure
  */
 
-export type { Rule, PluginConfig, Payload } from './types.js';
+// Re-export types from schemas (derived from z.infer<>)
+export type { Rule, PluginConfig, Payload } from '../schemas/index.js';
 
 // Re-export schemas for convenience
 export { RuleSchema, PluginConfigSchema } from '../schemas/index.js';

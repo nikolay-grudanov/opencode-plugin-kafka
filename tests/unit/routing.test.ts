@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { matchRule } from '../../src/core/routing.js';
-import type { Rule } from '../../src/core/types.js';
+import type { Rule } from '../../src/schemas/index.js';
 
 describe('matchRule', () => {
   // Тест 1: Rule with matching condition returns that rule

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildPrompt } from '../../src/core/prompt';
-import type { Rule } from '../../src/core/types';
+import type { Rule } from '../../src/schemas/index.js';
 
 describe('buildPrompt', () => {
   describe('Default prompt_field "$" extracts entire payload', () => {
@@ -151,8 +151,8 @@ describe('buildPrompt', () => {
     });
   });
 
-  describe('Primitive types return fallback', () => {
-    it('should return fallback when extracted value is a number', () => {
+  describe('Primitive types return string representation', () => {
+    it('should return "42" for number 42', () => {
       const payload = { count: 42 };
       const rule: Rule = {
         name: 'number-rule',
@@ -163,13 +163,27 @@ describe('buildPrompt', () => {
 
       const result = buildPrompt(payload, rule);
 
-      expect(result).toBe('Process this payload');
+      expect(result).toBe('42');
     });
 
-    it('should return fallback when extracted value is a boolean', () => {
+    it('should return "0" for number 0', () => {
+      const payload = { count: 0 };
+      const rule: Rule = {
+        name: 'number-zero-rule',
+        topic: 'test',
+        agent: 'test-agent',
+        prompt_field: '$.count',
+      };
+
+      const result = buildPrompt(payload, rule);
+
+      expect(result).toBe('0');
+    });
+
+    it('should return "true" for boolean true', () => {
       const payload = { active: true };
       const rule: Rule = {
-        name: 'boolean-rule',
+        name: 'boolean-true-rule',
         topic: 'test',
         agent: 'test-agent',
         prompt_field: '$.active',
@@ -177,7 +191,49 @@ describe('buildPrompt', () => {
 
       const result = buildPrompt(payload, rule);
 
-      expect(result).toBe('Process this payload');
+      expect(result).toBe('true');
+    });
+
+    it('should return "false" for boolean false', () => {
+      const payload = { active: false };
+      const rule: Rule = {
+        name: 'boolean-false-rule',
+        topic: 'test',
+        agent: 'test-agent',
+        prompt_field: '$.active',
+      };
+
+      const result = buildPrompt(payload, rule);
+
+      expect(result).toBe('false');
+    });
+
+    it('should return "42" for BigInt(42)', () => {
+      const payload = { big: BigInt(42) };
+      const rule: Rule = {
+        name: 'bigint-rule',
+        topic: 'test',
+        agent: 'test-agent',
+        prompt_field: '$.big',
+      };
+
+      const result = buildPrompt(payload, rule);
+
+      expect(result).toBe('42');
+    });
+
+    it('should return "" for empty string', () => {
+      const payload = { text: '' };
+      const rule: Rule = {
+        name: 'empty-string-rule',
+        topic: 'test',
+        agent: 'test-agent',
+        prompt_field: '$.text',
+      };
+
+      const result = buildPrompt(payload, rule);
+
+      expect(result).toBe('');
     });
   });
 });

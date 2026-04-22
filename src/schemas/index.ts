@@ -17,6 +17,11 @@ export const RuleSchema = z.object({
 });
 
 /**
+ * TypeScript type for Rule — derived from schema via z.infer<>
+ */
+export type Rule = z.infer<typeof RuleSchema>;
+
+/**
  * Zod schema for PluginConfig
  */
 export const PluginConfigSchema = z.object({
@@ -25,7 +30,11 @@ export const PluginConfigSchema = z.object({
 });
 
 /**
- * TypeScript types for configuration objects.
- * Импортируются из core/types.ts для единого источника истины.
+ * TypeScript type for PluginConfig — derived from schema via z.infer<>
  */
-export type { Rule, PluginConfig } from '../core/types.js';
+export type PluginConfig = z.infer<typeof PluginConfigSchema>;
+
+/**
+ * TypeScript type for Kafka message payload — unknown as structure varies by producer
+ */
+export type Payload = unknown;

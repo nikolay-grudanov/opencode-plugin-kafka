@@ -37,7 +37,7 @@
 2. **Given** `payload = { active: true }` и `prompt_field: "$.active"`, **When** вызывается `buildPrompt`, **Then** возвращается `"true"`
 3. **Given** `payload = { active: false }` и `prompt_field: "$.active"`, **When** вызывается `buildPrompt`, **Then** возвращается `"false"` (не fallback!)
 4. **Given** `rule.command = "check"` и примитив `42`, **When** вызывается `buildPrompt`, **Then** возвращается `"/check 42"`
-5. **Given** `payload = { value: null }`, **When** вызывается `buildPrompt`, **Then** по-прежнему возвращается fallback `"Process this payload"` (null — не примитив)
+5. **Given** `payload = { value: null }`, **When** вызывается `buildPrompt`, **Then** по-прежнему возвращается fallback `"Process this payload"` (null и undefined не считаются примитивными значениями)
 
 ---
 
@@ -62,7 +62,7 @@
 - `buildPrompt` с `BigInt` — не поддерживается `JSON.stringify`, должен конвертироваться через `String()`
 - `buildPrompt` с `0` (number zero) — `"0"`, не fallback
 - `buildPrompt` с пустой строкой `""` — пустая строка возвращается как есть (не fallback)
-- `parseConfig` с топиком в `rules`, которого нет в `topics` — правило не будет вызвано, но конфиг технически валиден (предупреждение, не ошибка)
+- `parseConfig` с топиком в `rules`, которого нет в `topics` — выбрасывает ошибку `Error` с сообщением `"Topics without rules: <список непокрытых топиков>"`
 
 ## Requirements *(mandatory)*
 
@@ -72,7 +72,7 @@
 
 - **FR-012**: Файл `src/core/types.ts` должен быть удалён
 - **FR-013**: Типы `Rule`, `PluginConfig`, `Payload` должны быть получены через `z.infer<typeof RuleSchema>` и `z.infer<typeof PluginConfigSchema>` и экспортироваться из `src/schemas/index.ts`
-- **FR-014**: Все импорты типов в `src/core/`, `src/schemas/`, `tests/` должны быть обновлены на `from '../schemas/index.js'` (или эквивалентный путь)
+- **FR-014**: Все импорты типов в `src/core/`, `src/schemas/`, `src/index.ts`, `tests/` должны быть обновлены на `from '../schemas/index.js'` (или эквивалентный путь)
 
 **Исправление `buildPrompt`:**
 
@@ -99,7 +99,7 @@
 
 ### Measurable Outcomes
 
-- **SC-008**: `z.infer<typeof RuleSchema>` и ручной интерфейс `Rule` дают идентичные типы (проверяется через TypeScript-comparison test)
+- **SC-008**: `z.infer<typeof RuleSchema>` и ручной интерфейс `Rule` дают идентичные типы (проверяется через ts-expect-error или ExpectType из @tsd)
 - **SC-009**: `buildPrompt({ count: 0 }, rule)` возвращает `"0"`, не fallback (проверяется unit-тестом)
 - **SC-010**: `parseConfig` с `topics: ["a", "b"]` и правилами только для `"a"` выбрасывает ошибку `"Topics without rules: b"` (проверяется unit-тестом)
 - **SC-011**: `npm test` показывает ≥ 90% coverage по итогам всех изменений (проверяется через coverage report)

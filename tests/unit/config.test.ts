@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseConfig } from '../../src/core/config';
 import { ZodError } from 'zod';
-import type { PluginConfig } from '../../src/core/types';
+import type { PluginConfig } from '../../src/schemas/index.js';
 
 describe('parseConfig', () => {
   describe('Valid config parsing returns PluginConfig', () => {
@@ -19,6 +19,14 @@ describe('parseConfig', () => {
             topic: 'topic1',
             agent: 'agent1',
             condition: '$.status == "active"',
+            command: '/process',
+            prompt_field: '$.data.text',
+          },
+          {
+            name: 'rule2',
+            topic: 'topic2',
+            agent: 'agent2',
+            condition: '$.status == "pending"',
             command: '/process',
             prompt_field: '$.data.text',
           },
@@ -146,6 +154,63 @@ describe('parseConfig', () => {
           })
         );
       }
+    });
+  });
+
+  describe('Topic coverage validation', () => {
+    it('should pass when all topics have rules', () => {
+      const validConfig = {
+        topics: ['a', 'b'],
+        rules: [
+          {
+            name: 'rule1',
+            topic: 'a',
+            agent: 'agent1',
+          },
+          {
+            name: 'rule2',
+            topic: 'b',
+            agent: 'agent2',
+          },
+        ],
+      };
+
+      expect(() => parseConfig(validConfig)).not.toThrow();
+    });
+
+    it('should throw "Topics without rules: b" when topic b has no rule', () => {
+      const invalidConfig = {
+        topics: ['a', 'b'],
+        rules: [
+          {
+            name: 'rule1',
+            topic: 'a',
+            agent: 'agent1',
+          },
+        ],
+      };
+
+      expect(() => parseConfig(invalidConfig)).toThrow('Topics without rules: b');
+    });
+
+    it('should throw error for topic without coverage', () => {
+      const invalidConfig = {
+        topics: ['topic1', 'topic2', 'topic3'],
+        rules: [
+          {
+            name: 'rule1',
+            topic: 'topic1',
+            agent: 'agent1',
+          },
+          {
+            name: 'rule2',
+            topic: 'topic1',
+            agent: 'agent2',
+          },
+        ],
+      };
+
+      expect(() => parseConfig(invalidConfig)).toThrow('Topics without rules: topic2, topic3');
     });
   });
 });
