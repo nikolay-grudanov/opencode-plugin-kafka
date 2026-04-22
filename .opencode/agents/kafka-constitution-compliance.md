@@ -7,6 +7,10 @@ temperature: 0.6
 permission:
   "*": allow
   todowrite: allow
+  task:
+    "*": "deny"
+    "code-*": "allow"
+    "general": "allow"
 ---
 
 # Роль агента

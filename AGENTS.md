@@ -13,10 +13,11 @@
 ```bash
 npm run check        # lint + test (порядок важен)
 npm run lint         # eslint src/**/*.ts
-npm run test         # vitest
+npx vitest run         # vitest
 npm run test:coverage # vitest --coverage
 npx vitest tests/unit/routing.test.ts  # конкретный файл
 ```
+
 
 ## Coverage Threshold
 

@@ -3,7 +3,7 @@
   "instructions": [".opencode/rules/*.md"],
   "agent": {
     "general": {
-      "model": "lemonade/extra.Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-GGUF",
+      "model": "minimax-coding-plan/MiniMax-M2.7",
       "permission": {
         "*": "allow"
       }
@@ -23,12 +23,17 @@
           "npm run *": "allow",
           "npx vitest *": "allow",
           "npx *": "allow",
+          "ls *": "allow",
+          "git *": "allow",
+          "gh *": "allow",
+          "cat *": "allow",
+          "rm *": "deny",
           "*": "deny"
         },
         "edit": "allow",
         "task": {
-          "kafka-test-orchestrator": "deny",
-          "kafka-constitution-*": "deny"
+          "*": "deny",
+          "general": "allow"
         }
       }
     },
@@ -47,11 +52,7 @@
           "*": "deny"
         },
         "edit": "ask",
-        "task": {
-          "code-*": "allow",
-          "security-*": "allow",
-          "qa-*": "allow"
-        }
+        "task": "deny"
       }
     },
     "security-reviewer": {
@@ -62,6 +63,7 @@
       "temperature": 0.6,
       "permission": {
         "todowrite": "allow",
+        "task": "deny",
         "bash": {
           "npm audit *": "allow",
           "npx *": "allow",
@@ -88,7 +90,8 @@
         },
         "edit": "allow",
         "task": {
-          "code-*": "allow"
+          "*": "deny",
+          "general": "allow"
         }
       }
     },
@@ -108,7 +111,7 @@
         },
         "edit": "ask",
         "task": {
-          "kafka-test-orchestrator": "allow",
+          "*": "deny",
           "code-*": "allow"
         }
       }
