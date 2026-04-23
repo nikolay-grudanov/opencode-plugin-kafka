@@ -5,23 +5,50 @@
  * Used by opencode-plugin-kafka to define plugin entry point.
  */
 
+import type { SDKClient } from './opencode-sdk.js';
+
+// ============================================================================
+// Plugin Context
+// ============================================================================
+
 /**
  * OpenCode plugin context
  *
- * Context object passed to plugin entry point.
- * Contents depend on OpenCode version and configuration.
+ * Контекст объекта, передаваемый в plugin entry point.
+ * Содержит SDK клиент и метаданные окружения.
  */
-export type PluginContext = unknown;
+export interface PluginContext {
+  /** OpenCode SDK клиент — типизированный доступ к session API */
+  client: SDKClient;
+  /** Метаданные проекта */
+  project: unknown;
+  /** Рабочая директория (cwd) */
+  directory: string;
+  /** Git root */
+  worktree: string;
+  /** Bun shell API */
+  $: unknown;
+}
+
+// ============================================================================
+// Plugin Hooks
+// ============================================================================
 
 /**
  * Plugin hooks returned by plugin function
  *
+ * Хуки для обработки событий плагина.
  * Currently empty object - plugin runs as standalone Kafka consumer.
  * May include event handlers in future versions.
  */
 export interface PluginHooks {
-  [key: string]: unknown;
+  /** Обработчик ошибок сессии — logging, не влияет на Kafka processing */
+  'session.error'?: (error: Error, sessionId: string) => void;
 }
+
+// ============================================================================
+// Plugin Function
+// ============================================================================
 
 /**
  * OpenCode plugin function type

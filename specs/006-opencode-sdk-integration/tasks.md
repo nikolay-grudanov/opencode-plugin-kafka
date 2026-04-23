@@ -13,9 +13,9 @@
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Создать директорию `src/opencode/` (новый модуль интеграции с OpenCode SDK)
-- [ ] T002 [P] Создать файл `src/types/opencode-sdk.d.ts` с type declarations (SDKClient, SessionsAPI, Session, AssistantMessage, MessagePart) — FR-004
-- [ ] T003 [P] Обновить `src/types/opencode-plugin.d.ts` — PluginContext с {client, project, directory, worktree, $}, PluginHooks, Plugin type — FR-005
+- [x] T001 Создать директорию `src/opencode/` (новый модуль интеграции с OpenCode SDK)
+- [x] T002 [P] Создать файл `src/types/opencode-sdk.d.ts` с type declarations (SDKClient, SessionsAPI, Session, AssistantMessage, MessagePart) — FR-004
+- [x] T003 [P] Обновить `src/types/opencode-plugin.d.ts` — PluginContext с {client, project, directory, worktree, $}, PluginHooks, Plugin type — FR-005
 
 ---
 
