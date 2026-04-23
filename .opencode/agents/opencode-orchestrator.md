@@ -7,6 +7,7 @@ temperature: 0.4
 tools:
   "*": false
   task: true
+  "compress*": true
   "think-mcp*": true
   "context7*": true
   "repomix*": true

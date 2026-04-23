@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { eachMessageHandler } from '../../src/kafka/consumer.js';
+import { eachMessageHandler, logDlqRate, logConsumerLagMetrics, isBrokerThrottleError, executeWithThrottleRetry } from '../../src/kafka/consumer.js';
 import type { PluginConfigV003, RuleV003 } from '../../src/schemas/index.js';
 import type { Producer } from 'kafkajs';
 
@@ -263,6 +263,35 @@ describe('eachMessageHandler', () => {
       const dlqCall = vi.mocked(sendToDlq).mock.calls[0];
       expect(dlqCall[2].message).toContain('Unexpected error');
     });
+
+    it('должен отправить в DLQ при не-Error в catch block (строка вместо Error)', async () => {
+      // Mock commitOffsets to throw a string instead of Error
+      mockCommitOffsets.mockImplementationOnce(() => {
+        throw 'String error instead of Error object';
+      });
+
+      const payload = {
+        topic: 'test-topic',
+        partition: 0,
+        message: {
+          value: Buffer.from('{"test": "value"}'),
+          offset: '0',
+          key: null,
+          headers: {},
+          timestamp: '2024-04-22T00:00:00.000Z',
+        },
+      };
+
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+
+      // Verify sendToDlq был вызван
+      expect(sendToDlq).toHaveBeenCalledTimes(1);
+
+      // Verify error message includes the string error
+      const dlqCall = vi.mocked(sendToDlq).mock.calls[0];
+      expect(dlqCall[2].message).toContain('Unexpected error');
+      expect(dlqCall[2].message).toContain('String error instead of Error object');
+    });
   });
 
   describe('buildPromptV003() returns fallback → no error', () => {
@@ -512,5 +541,929 @@ describe('eachMessageHandler', () => {
       // Verify commitOffsets was called
       expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+/**
+ * Unit tests для helper functions (logDlqRate, logConsumerLagMetrics, isBrokerThrottleError, executeWithThrottleRetry)
+ */
+describe('Helper functions', () => {
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
+
+  describe('logDlqRate', () => {
+    it('должен логировать DLQ rate каждые 100 сообщений', () => {
+      const state = {
+        isShuttingDown: false,
+        totalMessagesProcessed: 100,
+        dlqMessagesCount: 5,
+        lastDlqRateLogTime: Date.now() - 1000,
+      };
+
+      logDlqRate(state);
+
+      // Verify log содержит dlq_rate
+      expect(consoleLogSpy).toHaveBeenCalled();
+      const logCall = vi.mocked(consoleLogSpy).mock.calls[0];
+      const logObj = JSON.parse(logCall[0] as string);
+      expect(logObj.event).toBe('dlq_rate');
+      expect(logObj.totalMessages).toBe(100);
+      expect(logObj.dlqMessages).toBe(5);
+      expect(logObj.dlqRatePercent).toBe('5.00');
+    });
+
+    it('не должен логировать при totalMessagesProcessed === 0', () => {
+      const state = {
+        isShuttingDown: false,
+        totalMessagesProcessed: 0,
+        dlqMessagesCount: 0,
+        lastDlqRateLogTime: Date.now(),
+      };
+
+      logDlqRate(state);
+
+      expect(consoleLogSpy).not.toHaveBeenCalled();
+    });
+
+    it('не должен логировать при totalMessagesProcessed не кратном 100', () => {
+      const state = {
+        isShuttingDown: false,
+        totalMessagesProcessed: 50,
+        dlqMessagesCount: 2,
+        lastDlqRateLogTime: Date.now(),
+      };
+
+      logDlqRate(state);
+
+      expect(consoleLogSpy).not.toHaveBeenCalled();
+    });
+
+    it('должен обновлять lastDlqRateLogTime после логирования', () => {
+      const previousLogTime = Date.now() - 5000;
+      const state = {
+        isShuttingDown: false,
+        totalMessagesProcessed: 100,
+        dlqMessagesCount: 10,
+        lastDlqRateLogTime: previousLogTime,
+      };
+
+      logDlqRate(state);
+
+      expect(state.lastDlqRateLogTime).toBeGreaterThan(previousLogTime);
+    });
+
+    it('должен корректно вычислять 50% DLQ rate', () => {
+      const state = {
+        isShuttingDown: false,
+        totalMessagesProcessed: 200,
+        dlqMessagesCount: 100,
+        lastDlqRateLogTime: Date.now() - 1000,
+      };
+
+      logDlqRate(state);
+
+      const logCall = vi.mocked(consoleLogSpy).mock.calls[0];
+      const logObj = JSON.parse(logCall[0] as string);
+      expect(logObj.dlqRatePercent).toBe('50.00');
+    });
+  });
+
+  describe('logConsumerLagMetrics', () => {
+    it('должен логировать consumer lag metrics', () => {
+      const payload = {
+        topic: 'test-topic',
+        partition: 0,
+        offset: '123',
+        message: {
+          value: Buffer.from('{"test": "value"}'),
+          offset: '123',
+          key: null,
+          headers: {},
+          timestamp: '2024-04-22T00:00:00.000Z',
+        },
+      } as any;
+
+      logConsumerLagMetrics(payload);
+
+      expect(consoleLogSpy).toHaveBeenCalled();
+      const logCall = vi.mocked(consoleLogSpy).mock.calls[0];
+      const logObj = JSON.parse(logCall[0] as string);
+      expect(logObj.event).toBe('consumer_lag_metrics');
+      expect(logObj.topic).toBe('test-topic');
+      expect(logObj.partition).toBe(0);
+      expect(logObj.offset).toBe('123');
+      expect(logObj.messageTimestamp).toBe('2024-04-22T00:00:00.000Z');
+    });
+  });
+
+  describe('isBrokerThrottleError', () => {
+    it('должен возвращать true для ошибки с "throttle"', () => {
+      const error = new Error('Request throttled by broker');
+      expect(isBrokerThrottleError(error)).toBe(true);
+    });
+
+    it('должен возвращать true для ошибки с "rate limit"', () => {
+      const error = new Error('Rate limit exceeded');
+      expect(isBrokerThrottleError(error)).toBe(true);
+    });
+
+    it('должен возвращать true для ошибки с "too many requests"', () => {
+      const error = new Error('Too many requests');
+      expect(isBrokerThrottleError(error)).toBe(true);
+    });
+
+    it('должен возвращать true для ошибки с "THROTTLE" в верхнем регистре', () => {
+      const error = new Error('THROTTLE ERROR');
+      expect(isBrokerThrottleError(error)).toBe(true);
+    });
+
+    it('должен возвращать false для обычной ошибки', () => {
+      const error = new Error('Connection refused');
+      expect(isBrokerThrottleError(error)).toBe(false);
+    });
+
+    it('должен обрабатывать строку вместо Error объекта', () => {
+      const errorString = 'Some random error';
+      expect(isBrokerThrottleError(errorString)).toBe(false);
+    });
+
+    it('должен обрабатывать null', () => {
+      expect(isBrokerThrottleError(null)).toBe(false);
+    });
+
+    it('должен обрабатывать undefined', () => {
+      expect(isBrokerThrottleError(undefined)).toBe(false);
+    });
+
+    it('должен обрабатывать объект без message', () => {
+      const error = { code: 'ERR_THROTTLED' } as any;
+      expect(isBrokerThrottleError(error)).toBe(false);
+    });
+  });
+
+  describe('executeWithThrottleRetry', () => {
+    it('должен успешно выполнить операцию с первой попытки', async () => {
+      const operation = vi.fn().mockResolvedValue('success');
+
+      const result = await executeWithThrottleRetry(operation, 'testOperation');
+
+      expect(result).toBe('success');
+      expect(operation).toHaveBeenCalledTimes(1);
+    });
+
+    it('должен выполнить retry при throttle ошибке и успехе на второй попытке', async () => {
+      const throttleError = new Error('Request throttled by broker');
+      const operation = vi
+        .fn()
+        .mockRejectedValueOnce(throttleError)
+        .mockResolvedValueOnce('success');
+
+      const result = await executeWithThrottleRetry(operation, 'testOperation');
+
+      expect(result).toBe('success');
+      expect(operation).toHaveBeenCalledTimes(2);
+      // Проверяем что было логирование throttle
+      expect(consoleWarnSpy).toHaveBeenCalled();
+    });
+
+    it('должен выбросить ошибку после max retries при throttle', async () => {
+      const throttleError = new Error('Request throttled by broker');
+      const operation = vi.fn().mockRejectedValue(throttleError);
+
+      await expect(executeWithThrottleRetry(operation, 'testOperation')).rejects.toThrow(
+        'Request throttled by broker',
+      );
+
+      // MAX_THROTTLE_RETRIES = 3
+      expect(operation).toHaveBeenCalledTimes(3);
+      // Проверяем что было error логирование
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    it('должен выбросить ошибку сразу при не-throttle ошибке', async () => {
+      const normalError = new Error('Connection refused');
+      const operation = vi.fn().mockRejectedValue(normalError);
+
+      await expect(executeWithThrottleRetry(operation, 'testOperation')).rejects.toThrow(
+        'Connection refused',
+      );
+
+      expect(operation).toHaveBeenCalledTimes(1);
+      // Не должно быть throttle warnings
+      expect(consoleWarnSpy).not.toHaveBeenCalled();
+    });
+
+    it('должен логировать retry попытку', async () => {
+      const throttleError = new Error('throttled');
+      const operation = vi
+        .fn()
+        .mockRejectedValueOnce(throttleError)
+        .mockResolvedValueOnce('success');
+
+      await executeWithThrottleRetry(operation, 'commitOffsets');
+
+      // Проверяем info лог о retry
+      const infoLogCalls = vi.mocked(consoleLogSpy).mock.calls.filter((call) => {
+        const logObj = JSON.parse(call[0] as string);
+        return logObj.event === 'broker_throttle_retrying';
+      });
+      expect(infoLogCalls.length).toBe(1);
+    });
+  });
+});
+
+/**
+ * Unit tests для shutdown state в eachMessageHandler
+ */
+describe('eachMessageHandler shutdown state', () => {
+  let mockDlqProducer: Producer;
+  let mockCommitOffsets: ReturnType<typeof vi.fn>;
+  let mockConfig: PluginConfigV003;
+  let mockState: any;
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    mockDlqProducer = {} as Producer;
+    mockCommitOffsets = vi.fn().mockResolvedValue(undefined);
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockState = {
+      isShuttingDown: true, // Важно: Shutdown в процессе
+      totalMessagesProcessed: 50,
+      dlqMessagesCount: 5,
+      lastDlqRateLogTime: Date.now(),
+    };
+
+    const rules = [
+      {
+        name: 'test-rule',
+        jsonPath: '$.test',
+        promptTemplate: 'Process: ${$}',
+      },
+    ];
+
+    mockConfig = {
+      topics: ['test-topic'],
+      rules: rules,
+    };
+
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+  });
+
+  it('должен пропустить сообщение когда isShuttingDown === true', async () => {
+    const payload = {
+      topic: 'test-topic',
+      partition: 0,
+      message: {
+        value: Buffer.from('{"test": "value"}'),
+        offset: '0',
+        key: null,
+        headers: {},
+        timestamp: '2024-04-22T00:00:00.000Z',
+      },
+    };
+
+    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+
+    // Verify message_skipped_during_shutdown логируется
+    expect(consoleLogSpy).toHaveBeenCalled();
+    const logCall = vi.mocked(consoleLogSpy).mock.calls.find((call) => {
+      return JSON.stringify(call).includes('message_skipped_during_shutdown');
+    });
+    expect(logCall).toBeDefined();
+
+    // Verify commitOffsets НЕ был вызван
+    expect(mockCommitOffsets).not.toHaveBeenCalled();
+
+    // Verify totalMessagesProcessed НЕ увеличился
+    expect(mockState.totalMessagesProcessed).toBe(50);
+  });
+
+  it('должен корректно обрабатывать isShuttingDown = false (нормальный flow)', async () => {
+    mockState.isShuttingDown = false;
+
+    const payload = {
+      topic: 'test-topic',
+      partition: 0,
+      message: {
+        value: Buffer.from('{"test": "value"}'),
+        offset: '0',
+        key: null,
+        headers: {},
+        timestamp: '2024-04-22T00:00:00.000Z',
+      },
+    };
+
+    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+
+    // Verify commitOffsets был вызван
+    expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+
+    // Verify totalMessagesProcessed увеличился
+    expect(mockState.totalMessagesProcessed).toBe(51);
+  });
+});
+
+/**
+ * Unit tests для KAFKA_IGNORE_TOMBSTONES
+ */
+describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
+  let mockDlqProducer: Producer;
+  let mockCommitOffsets: ReturnType<typeof vi.fn>;
+  let mockConfig: PluginConfigV003;
+  let mockState: any;
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let originalEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    originalEnv = process.env;
+    mockDlqProducer = {} as Producer;
+    mockCommitOffsets = vi.fn().mockResolvedValue(undefined);
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockState = {
+      isShuttingDown: false,
+      totalMessagesProcessed: 0,
+      dlqMessagesCount: 0,
+      lastDlqRateLogTime: Date.now(),
+    };
+
+    const rules = [
+      {
+        name: 'test-rule',
+        jsonPath: '$.test',
+        promptTemplate: 'Process: ${$}',
+      },
+    ];
+
+    mockConfig = {
+      topics: ['test-topic'],
+      rules: rules,
+    };
+
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    process.env = originalEnv;
+  });
+
+  it('должен игнорировать tombstone когда KAFKA_IGNORE_TOMBSTONES=true', async () => {
+    process.env.KAFKA_IGNORE_TOMBSTONES = 'true';
+
+    const payload = {
+      topic: 'test-topic',
+      partition: 0,
+      message: {
+        value: null, // Tombstone
+        offset: '0',
+        key: null,
+        headers: {},
+        timestamp: '2024-04-22T00:00:00.000Z',
+      },
+    };
+
+    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+
+    // Verify tombstone_ignored логируется
+    expect(consoleLogSpy).toHaveBeenCalled();
+    const logCall = vi.mocked(consoleLogSpy).mock.calls.find((call) => {
+      return JSON.stringify(call).includes('tombstone_ignored');
+    });
+    expect(logCall).toBeDefined();
+
+    // Verify commitOffsets был вызван
+    expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+
+    // Verify sendToDlq НЕ был вызван
+    expect(sendToDlq).not.toHaveBeenCalled();
+  });
+
+  it('должен отправлять tombstone в DLQ когда KAFKA_IGNORE_TOMBSTONES=false', async () => {
+    process.env.KAFKA_IGNORE_TOMBSTONES = 'false';
+
+    const payload = {
+      topic: 'test-topic',
+      partition: 0,
+      message: {
+        value: null, // Tombstone
+        offset: '0',
+        key: null,
+        headers: {},
+        timestamp: '2024-04-22T00:00:00.000Z',
+      },
+    };
+
+    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+
+    // Verify sendToDlq был вызван
+    expect(sendToDlq).toHaveBeenCalledTimes(1);
+  });
+
+  it('должен отправлять tombstone в DLQ когда KAFKA_IGNORE_TOMBSTONES не установлен (default)', async () => {
+    // KAFKA_IGNORE_TOMBSTONES не установлен
+    delete process.env.KAFKA_IGNORE_TOMBSTONES;
+
+    const payload = {
+      topic: 'test-topic',
+      partition: 0,
+      message: {
+        value: null, // Tombstone
+        offset: '0',
+        key: null,
+        headers: {},
+        timestamp: '2024-04-22T00:00:00.000Z',
+      },
+    };
+
+    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+
+    // Verify sendToDlq был вызван (default behavior)
+    expect(sendToDlq).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Unit tests для performGracefulShutdown
+ */
+describe('performGracefulShutdown', () => {
+  // Импортируем после моков
+  let performGracefulShutdown: typeof import('../../src/kafka/consumer.js').performGracefulShutdown;
+  let mockConsumer: any;
+  let mockProducer: any;
+  let mockState: any;
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let processExitSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    // Моки должны быть установлены до импорта
+    vi.clearAllMocks();
+
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    processExitSpy = vi.spyOn(process, 'exit').mockImplementation(vi.fn());
+
+    mockState = {
+      isShuttingDown: false,
+      totalMessagesProcessed: 100,
+      dlqMessagesCount: 5,
+      lastDlqRateLogTime: Date.now(),
+    };
+
+    // Мокаем consumer и producer
+    mockConsumer = {
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockProducer = {
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+
+    // Динамический импорт чтобы подхватить моки
+    const consumerModule = await import('../../src/kafka/consumer.js');
+    performGracefulShutdown = consumerModule.performGracefulShutdown;
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    processExitSpy.mockRestore();
+  });
+
+  it('должен успешно выполнить shutdown (оба disconnect успешны)', async () => {
+    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockState.isShuttingDown).toBe(true);
+
+    // Проверяем логирование всех этапов
+    const logCalls = vi.mocked(consoleLogSpy).mock.calls.map((call) =>
+      JSON.parse(call[0] as string).event,
+    );
+    expect(logCalls).toContain('graceful_shutdown_started');
+    expect(logCalls).toContain('consumer_disconnect_started');
+    expect(logCalls).toContain('consumer_disconnect_completed');
+    expect(logCalls).toContain('producer_disconnect_started');
+    expect(logCalls).toContain('producer_disconnect_completed');
+    expect(logCalls).toContain('graceful_shutdown_completed');
+  });
+
+  it('должен продолжить producer disconnect если consumer disconnect падает', async () => {
+    mockConsumer.disconnect.mockRejectedValueOnce(new Error('Consumer disconnect failed'));
+
+    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockProducer.disconnect).toHaveBeenCalledTimes(1); // Producer всё равно отключается
+    expect(mockState.isShuttingDown).toBe(true);
+
+    // Проверяем логирование ошибки consumer
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    const errorLog = vi.mocked(consoleErrorSpy).mock.calls.find((call) => {
+      return JSON.stringify(call).includes('consumer_disconnect_failed');
+    });
+    expect(errorLog).toBeDefined();
+  });
+
+  it('должен завершить shutdown если producer disconnect падает', async () => {
+    mockProducer.disconnect.mockRejectedValueOnce(new Error('Producer disconnect failed'));
+
+    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockState.isShuttingDown).toBe(true);
+
+    // Проверяем логирование ошибки producer
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    const errorLog = vi.mocked(consoleErrorSpy).mock.calls.find((call) => {
+      return JSON.stringify(call).includes('producer_disconnect_failed');
+    });
+    expect(errorLog).toBeDefined();
+  });
+
+  it('должен быть idempotent (повторный вызов игнорируется)', async () => {
+    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+
+    // Второй вызов
+    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+
+    // Только один раз disconnect был вызван
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockProducer.disconnect).toHaveBeenCalledTimes(1);
+
+    // Проверяем логирование shutdown_already_in_progress
+    const warnLog = vi.mocked(consoleLogSpy).mock.calls.find((call) => {
+      return JSON.stringify(call).includes('shutdown_already_in_progress');
+    });
+    expect(warnLog).toBeDefined();
+  });
+
+  it('должен выйти с кодом 1 при timeout', async () => {
+    vi.useFakeTimers();
+
+    mockConsumer.disconnect.mockImplementation(
+      () => new Promise((resolve) => setTimeout(resolve, 20_000)), // долгий disconnect
+    );
+
+    const shutdownPromise = performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+
+    // Fast-forward времени
+    vi.advanceTimersByTime(15_000);
+
+    await vi.runAllTimersAsync();
+
+    try {
+      await shutdownPromise;
+    } catch {
+      // Expected to timeout
+    }
+
+    // Проверяем force exit
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+
+    vi.useRealTimers();
+  });
+
+  it('должен корректно обработать не-Error в consumer.disconnect error', async () => {
+    // Мокаем disconnect чтобы выбросил строку вместо Error
+    mockConsumer.disconnect.mockRejectedValueOnce('String error not an Error object');
+
+    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+
+    // Должен продолжить и disconnect producer
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockProducer.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('должен корректно обработать не-Error в producer.disconnect error', async () => {
+    // Мокаем consumer disconnect успешным, а producer - строкой вместо Error
+    mockProducer.disconnect.mockRejectedValueOnce('String producer error not an Error object');
+
+    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+
+    // Должен продолжить shutdown несмотря на ошибку producer
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockState.isShuttingDown).toBe(true);
+  });
+
+  it('должен корректно обработать строку в outer catch block (timeout)', async () => {
+    // Используем fake timers для timeout
+    vi.useFakeTimers();
+
+    // Мокаем consumer.disconnect который永远不会 завершается (зависает)
+    mockConsumer.disconnect.mockImplementation(
+      () => new Promise((_, reject) => setTimeout(() => reject('Timeout as string'), 20_000)),
+    );
+
+    const shutdownPromise = performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+
+    // Fast-forward времени до срабатывания timeout
+    vi.advanceTimersByTime(25_000);
+
+    try {
+      await shutdownPromise;
+    } catch (e) {
+      // Expected: timeout error
+    }
+
+    // Проверяем force exit
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+
+    vi.useRealTimers();
+  });
+});
+
+/**
+ * Unit tests для startConsumer
+ */
+describe('startConsumer', () => {
+  // Моки
+  vi.mock('../../src/kafka/client.js', () => ({
+    createKafkaClient: vi.fn(),
+    createConsumer: vi.fn(),
+    createDlqProducer: vi.fn(),
+  }));
+
+  let startConsumer: typeof import('../../src/kafka/consumer.js').startConsumer;
+  let mockKafka: any;
+  let mockConsumer: any;
+  let mockDlqProducer: any;
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let processExitSpy: ReturnType<typeof vi.spyOn>;
+  let processOnceSpy: ReturnType<typeof vi.spyOn>;
+
+  const mockConfig: PluginConfigV003 = {
+    topics: ['test-topic'],
+    rules: [
+      {
+        name: 'test-rule',
+        jsonPath: '$.test',
+        promptTemplate: 'Process: ${$}',
+      },
+    ],
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    processExitSpy = vi.spyOn(process, 'exit').mockImplementation(vi.fn());
+
+    // Мокаем process.once для SIGTERM/SIGINT
+    processOnceSpy = vi.spyOn(process, 'once').mockImplementation((event: any, handler: any) => {
+      if (event === 'SIGTERM' || event === 'SIGINT') {
+        // Сохраняем handler для вызова позже в тесте
+        (process as any)._savedHandlers = (process as any)._savedHandlers || {};
+        (process as any)._savedHandlers[event] = handler;
+      }
+      return process;
+    });
+
+    // Мокаем Kafka клиенты
+    mockConsumer = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn().mockResolvedValue(undefined),
+      run: vi.fn().mockResolvedValue(undefined),
+      commitOffsets: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockDlqProducer = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockKafka = {};
+
+    // Настраиваем моки модуля client.js
+    const clientModule = await import('../../src/kafka/client.js');
+    vi.mocked(clientModule.createKafkaClient).mockReturnValue({
+      kafka: mockKafka,
+      validatedEnv: { KAFKA_BROKERS: 'localhost:9092', KAFKA_GROUP_ID: 'test-group' },
+    });
+    vi.mocked(clientModule.createConsumer).mockReturnValue(mockConsumer);
+    vi.mocked(clientModule.createDlqProducer).mockReturnValue(mockDlqProducer);
+
+    const consumerModule = await import('../../src/kafka/consumer.js');
+    startConsumer = consumerModule.startConsumer;
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    processExitSpy.mockRestore();
+    if (processOnceSpy) processOnceSpy.mockRestore();
+  });
+
+  it('должен успешно запустить consumer', async () => {
+    const startPromise = startConsumer(mockConfig);
+
+    // Даём время для инициализации
+    await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
+
+    await startPromise;
+
+    // Проверяем успешный запуск
+    expect(mockConsumer.connect).toHaveBeenCalledTimes(1);
+    expect(mockDlqProducer.connect).toHaveBeenCalledTimes(1);
+    expect(mockConsumer.subscribe).toHaveBeenCalledWith({ topics: ['test-topic'] });
+    expect(mockConsumer.run).toHaveBeenCalled();
+    expect(processExitSpy).not.toHaveBeenCalled();
+  });
+
+  it('должен выполнить graceful shutdown и exit(1) при consumer.connect() error', async () => {
+    mockConsumer.connect.mockRejectedValueOnce(new Error('Connection failed'));
+
+    const startPromise = startConsumer(mockConfig);
+
+    await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
+
+    try {
+      await startPromise;
+    } catch {
+      // Expected
+    }
+
+    // Проверяем exit с кодом 1
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('должен выполнить graceful shutdown и exit(1) при dlqProducer.connect() error', async () => {
+    mockDlqProducer.connect.mockRejectedValueOnce(new Error('DLQ connection failed'));
+
+    const startPromise = startConsumer(mockConfig);
+
+    await vi.waitFor(() => expect(mockDlqProducer.connect).toHaveBeenCalled());
+
+    try {
+      await startPromise;
+    } catch {
+      // Expected
+    }
+
+    // Проверяем exit с кодом 1
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('должен выполнить graceful shutdown и exit(1) при consumer.subscribe() error', async () => {
+    mockConsumer.subscribe.mockRejectedValueOnce(new Error('Subscribe failed'));
+
+    const startPromise = startConsumer(mockConfig);
+
+    await vi.waitFor(() => expect(mockConsumer.subscribe).toHaveBeenCalled());
+
+    try {
+      await startPromise;
+    } catch {
+      // Expected
+    }
+
+    // Проверяем exit с кодом 1
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('должен выйти с кодом 0 при SIGTERM', async () => {
+    // Запускаем consumer (не ждём завершения - он работает в фоне)
+    startConsumer(mockConfig);
+
+    // Дожидаемся инициализации
+    await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mockDlqProducer.connect).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mockConsumer.subscribe).toHaveBeenCalled());
+
+    // Вызываем SIGTERM handler - он async, поэтому запускаем но не ждём
+    const savedHandlers = (process as any)._savedHandlers;
+    if (savedHandlers && savedHandlers['SIGTERM']) {
+      // SIGTERM handler вызывает performGracefulShutdown + process.exit(0)
+      // process.exit замокан, performGracefulShutdown должен вызвать disconnect
+      savedHandlers['SIGTERM']('SIGTERM');
+    }
+
+    // Даём время для выполнения async shutdown
+    await vi.waitFor(() => expect(processExitSpy).toHaveBeenCalled(), { timeout: 2000 });
+
+    // Проверяем graceful shutdown и exit(0)
+    expect(mockConsumer.disconnect).toHaveBeenCalled();
+    expect(processExitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('должен выйти с кодом 0 при SIGINT', async () => {
+    // Запускаем consumer (не ждём завершения - он работает в фоне)
+    startConsumer(mockConfig);
+
+    // Дожидаемся инициализации
+    await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mockDlqProducer.connect).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mockConsumer.subscribe).toHaveBeenCalled());
+
+    // Вызываем SIGINT handler
+    const savedHandlers = (process as any)._savedHandlers;
+    if (savedHandlers && savedHandlers['SIGINT']) {
+      savedHandlers['SIGINT']('SIGINT');
+    }
+
+    // Даём время для выполнения async shutdown
+    await vi.waitFor(() => expect(processExitSpy).toHaveBeenCalled(), { timeout: 2000 });
+
+    // Проверяем graceful shutdown и exit(0)
+    expect(mockConsumer.disconnect).toHaveBeenCalled();
+    expect(processExitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('должен выполнить graceful shutdown и exit(1) при consumer.run() error', async () => {
+    // Мокаем run чтобы он выбросил ошибку
+    mockConsumer.run.mockRejectedValueOnce(new Error('Consumer run loop failed'));
+
+    // Запускаем consumer
+    startConsumer(mockConfig);
+
+    // Дожидаемся инициализации
+    await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
+
+    // Ждём пока ошибка будет обработана и exit(1) вызван
+    await vi.waitFor(() => expect(processExitSpy).toHaveBeenCalledWith(1), { timeout: 2000 });
+
+    // Проверяем что disconnect был вызван (через performGracefulShutdown)
+    expect(mockConsumer.disconnect).toHaveBeenCalled();
+  });
+
+  it('должен корректно вызвать eachMessage callback через consumer.run()', async () => {
+    // Мокаем run чтобы он сразу вызвал eachMessage callback
+    mockConsumer.run.mockImplementationOnce((config: any) => {
+      // Вызываем eachMessage callback сразу с тестовым payload
+      if (config.eachMessage) {
+        const testPayload = {
+          topic: 'test-topic',
+          partition: 0,
+          message: {
+            value: Buffer.from('{"test": "value"}'),
+            offset: '0',
+            key: null,
+            headers: {},
+            timestamp: '2024-04-22T00:00:00.000Z',
+          },
+        };
+        config.eachMessage(testPayload);
+      }
+      return Promise.resolve();
+    });
+
+    // Запускаем consumer
+    startConsumer(mockConfig);
+
+    // Дожидаемся инициализации и выполнения callback
+    await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mockConsumer.run).toHaveBeenCalled());
+
+    // callback должен был вызвать eachMessageHandler и commitOffsets
+    expect(mockConsumer.commitOffsets).toHaveBeenCalled();
+  });
+
+  it('должен корректно обработать не-Error в consumer.run() error', async () => {
+    // Мокаем run чтобы выбросил строку вместо Error объекта
+    mockConsumer.run.mockRejectedValueOnce('String error from run loop');
+
+    // Запускаем consumer
+    startConsumer(mockConfig);
+
+    // Дожидаемся инициализации
+    await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
+
+    // Ждём пока ошибка будет обработана и exit(1) вызван
+    await vi.waitFor(() => expect(processExitSpy).toHaveBeenCalledWith(1), { timeout: 2000 });
+  });
+
+  it('должен корректно обработать не-Error в startConsumer error', async () => {
+    // Мокаем connect чтобы выбросил строку вместо Error объекта
+    mockConsumer.connect.mockRejectedValueOnce('String connection error');
+
+    // Запускаем consumer
+    startConsumer(mockConfig);
+
+    // Ждём пока ошибка будет обработана и exit(1) вызван
+    await vi.waitFor(() => expect(processExitSpy).toHaveBeenCalledWith(1), { timeout: 2000 });
   });
 });

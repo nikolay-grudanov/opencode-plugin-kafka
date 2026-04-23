@@ -52,7 +52,7 @@ export type CommitOffsetsFn = (
 /**
  * Состояние consumer для отслеживания метрик и shutdown (Constitution Principle IV: No-State Consumer).
  */
-interface ConsumerState {
+export interface ConsumerState {
   isShuttingDown: boolean;
   totalMessagesProcessed: number;
   dlqMessagesCount: number;
@@ -67,7 +67,7 @@ interface ConsumerState {
  * @param state - Состояние consumer с метриками
  * @returns void
  */
-function logDlqRate(state: ConsumerState): void {
+export function logDlqRate(state: ConsumerState): void {
   const currentTime = Date.now();
   const timeSinceLastLog = currentTime - state.lastDlqRateLogTime;
 
@@ -100,7 +100,7 @@ function logDlqRate(state: ConsumerState): void {
  * @param payload - Сообщение из Kafka (eachMessage payload)
  * @returns void
  */
-function logConsumerLagMetrics(payload: EachMessagePayload): void {
+export function logConsumerLagMetrics(payload: EachMessagePayload): void {
   console.log(
     JSON.stringify({
       level: 'debug',
@@ -123,7 +123,7 @@ function logConsumerLagMetrics(payload: EachMessagePayload): void {
  * @param error - Ошибка для проверки
  * @returns true если это throttle ошибка, иначе false
  */
-function isBrokerThrottleError(error: unknown): boolean {
+export function isBrokerThrottleError(error: unknown): boolean {
   const errorMessage = error instanceof Error ? error.message : String(error);
   return (
     errorMessage.toLowerCase().includes('throttle') ||
@@ -148,7 +148,7 @@ function isBrokerThrottleError(error: unknown): boolean {
  *
  * @template T - Тип возвращаемого значения операции
  */
-async function executeWithThrottleRetry<T>(
+export async function executeWithThrottleRetry<T>(
   operation: () => Promise<T>,
   operationName: string,
 ): Promise<T> {
@@ -453,7 +453,7 @@ export async function eachMessageHandler(
  * await performGracefulShutdown(consumer, dlqProducer, 'SIGTERM', state);
  * ```
  */
-async function performGracefulShutdown(
+export async function performGracefulShutdown(
   consumer: Consumer,
   producer: Producer,
   signal: string,

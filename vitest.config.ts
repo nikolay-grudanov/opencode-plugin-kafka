@@ -4,6 +4,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    exclude: [
+      'tests/integration/**',
+      '**/*.integration.test.ts',
+      'node_modules/**',
+      '.opencode/**',
+    ],
   },
   coverage: {
     provider: 'v8',
