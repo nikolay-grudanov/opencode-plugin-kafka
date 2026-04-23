@@ -7,6 +7,22 @@
 
 ---
 
+## Архитектурный контекст
+
+Спецификация основана на архитектурных решениях, задокументированных в ADR:
+
+| ADR | Описание |
+|-----|----------|
+| [ADR-001](../../docs/architecture/ADR-001-opencode-sdk-integration.md) | Выбор подхода интеграции с OpenCode SDK |
+| [ADR-002](../../docs/architecture/ADR-002-types-and-schemas.md) | Типы и схемы (PluginContext, RuleV003Schema) |
+| [ADR-003](../../docs/architecture/ADR-003-integration-layer.md) | Integration Layer (IOpenCodeAgent, Adapter, Mock) |
+| [ADR-004](../../docs/architecture/ADR-004-consumer-integration.md) | Consumer integration, response producer, graceful shutdown |
+| [ADR-005](../../docs/architecture/ADR-005-event-hooks.md) | Event hooks (session.error) |
+| [ADR-006](../../docs/architecture/ADR-006-architecture-diagram.md) | Архитектурные диаграммы |
+| [ADR-007](../../docs/architecture/ADR-007-validation.md) | Валидация конституции и coverage |
+
+---
+
 ## 1. User Scenarios & Testing
 
 ### User Story 1 — Автоматический запуск OpenCode агента по Kafka сообщению (Priority: P1)
@@ -210,6 +226,8 @@ interface IOpenCodeAgent {
 
 **Экспорты**: Type declarations (no runtime code)
 
+> **ADR**: [ADR-002](../../docs/architecture/ADR-002-types-and-schemas.md) — определение типов SDK (SDKClient, SessionsAPI, Session, Message, MessagePart)
+
 **Сигнатуры**:
 
 ```typescript
@@ -317,6 +335,8 @@ interface PluginHooks {
 
 **Логика**: Определяем типы PluginContext и PluginHooks. Следует ADR-002.
 
+> **ADR**: [ADR-002](../../docs/architecture/ADR-002-types-and-schemas.md) — типы PluginContext и PluginHooks
+
 ---
 
 ### 4.3 src/schemas/index.ts (Изменения)
@@ -345,6 +365,8 @@ export type RuleV003 = z.infer<typeof RuleV003Schema>;
 ```
 
 **FR**: FR-003 (RuleV003Schema)
+
+> **ADR**: [ADR-002](../../docs/architecture/ADR-002-types-and-schemas.md) — схема RuleV003Schema с полями agentId, responseTopic, timeoutSeconds, concurrency
 
 ---
 
@@ -377,6 +399,8 @@ function validateTopicCoverage(config: PluginConfigV003): void {
 
 **Логика**: fail-fast при невалидной конфигурации. Следует Constitution Principle I.
 
+> **ADR**: [ADR-002](../../docs/architecture/ADR-002-types-and-schemas.md) — парсинг конфига через Zod; [ADR-007](../../docs/architecture/ADR-007-validation.md) — FR-017 topic coverage validation
+
 ---
 
 ### 4.5 src/core/routing.ts
@@ -401,6 +425,8 @@ export function matchRuleV003(
 **FR**: FR-011 (Message Routing)
 
 **Логика**: Pure function, легко тестируется. Следует Constitution Principle II.
+
+> **ADR**: [ADR-007](../../docs/architecture/ADR-007-validation.md) — Domain Isolation (pure function без side effects)
 
 ---
 
@@ -428,6 +454,8 @@ export function buildPromptV003(
 **FR**: FR-012 (Prompt Building)
 
 **Логика**: Pure function, String() для примитивов. Следует Constitution Principle II.
+
+> **ADR**: [ADR-007](../../docs/architecture/ADR-007-validation.md) — Domain Isolation (pure function без side effects)
 
 ---
 
@@ -468,6 +496,8 @@ export interface AgentResult {
 **FR**: FR-006 (IOpenCodeAgent Interface)
 
 **Логика**: Mockable интерфейс для изоляции зависимостей. Следует ADR-003 Wahl #2.
+
+> **ADR**: [ADR-003](../../docs/architecture/ADR-003-integration-layer.md) — IOpenCodeAgent interface (mockable abstraction)
 
 ---
 
@@ -513,6 +543,8 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
 
 **Логика**: Реализует IOpenCodeAgent через real SDK. Timeout handling через Promise.race(). Best-effort abort.
 
+> **ADR**: [ADR-003](../../docs/architecture/ADR-003-integration-layer.md) — OpenCodeAgentAdapter (SDK integration, timeout, response extraction)
+
 ---
 
 ### 4.9 src/opencode/MockOpenCodeAgent.ts
@@ -553,6 +585,8 @@ export class MockOpenCodeAgent implements IOpenCodeAgent {
 
 **Логика**: Mock для unit tests. Позволяет достичь 90%+ coverage.
 
+> **ADR**: [ADR-003](../../docs/architecture/ADR-003-integration-layer.md) — MockOpenCodeAgent (mockable interface для тестирования)
+
 ---
 
 ### 4.10 src/opencode/AgentError.ts
@@ -582,6 +616,8 @@ export class AgentError extends Error {
 **FR**: FR-009 (AgentError Classes)
 
 **Логика**: Кастомные классы ошибок для区分 timeout и agent errors.
+
+> **ADR**: [ADR-003](../../docs/architecture/ADR-003-integration-layer.md) — TimeoutError, AgentError (кастомные ошибки)
 
 ---
 
@@ -616,6 +652,8 @@ export function createResponseProducer(kafka: Kafka): Producer {
 **FR**: FR-010 (Kafka Client)
 
 **Логика**: Factory functions для Kafka компонентов. ensure `allowAutoTopicCreation: false`.
+
+> **ADR**: [ADR-004](../../docs/architecture/ADR-004-consumer-integration.md) — createResponseProducer factory
 
 ---
 
@@ -687,6 +725,8 @@ export async function startConsumer(
 
 **Логика**: 10-step flow. Try-catch для resilience. Следует Constitution Principle III.
 
+> **ADR**: [ADR-004](../../docs/architecture/ADR-004-consumer-integration.md) — eachMessageHandler, response producer, graceful shutdown, DLQ handling
+
 ---
 
 ### 4.13 src/kafka/response-producer.ts (Новый файл)
@@ -727,6 +767,8 @@ export async function sendResponse(
 
 **Логика**: Optional — только если responseTopic указан. Error handling без DLQ.
 
+> **ADR**: [ADR-004](../../docs/architecture/ADR-004-consumer-integration.md) — response producer для отправки ответов в Kafka
+
 ---
 
 ### 4.14 src/kafka/dlq.ts
@@ -762,6 +804,8 @@ export async function sendToDlq(
 
 **Логика**: Envelope format для traceability.
 
+> **ADR**: [ADR-004](../../docs/architecture/ADR-004-consumer-integration.md) — DLQ handling для ошибок обработки
+
 ---
 
 ### 4.15 src/index.ts (Изменения)
@@ -789,6 +833,8 @@ export default async function plugin(context: PluginContext) {
 **FR**: FR-001 (Plugin Entry Point)
 
 **Логика**: Точка входа. Fail-fast при errors. Возвращает hooks.
+
+> **ADR**: [ADR-001](../../docs/architecture/ADR-001-opencode-sdk-integration.md) — точка входа плагина; [ADR-005](../../docs/architecture/ADR-005-event-hooks.md) — session.error hook
 
 ---
 
@@ -877,6 +923,8 @@ src/types/opencode-plugin.d.ts
 | 7 | **Timeout flow** | Promise.race timeout | Mock timeout | DLQ message, commit offset |
 | 8 | **Error flow** | Agent error | Mock agent error | DLQ message, commit offset |
 
+> **ADR**: [ADR-006](../../docs/architecture/ADR-006-architecture-diagram.md) — диаграммы для понимания потоков; [ADR-007](../../docs/architecture/ADR-007-validation.md) — coverage ≥ 90%
+
 ---
 
 ## 7. Migration Guide
@@ -940,3 +988,5 @@ src/types/opencode-plugin.d.ts
 6. **No retry**: DLQ для всех ошибок — fail-fast behavior
 7. **Sequential processing**: Нет параллелизма — backpressure protection
 8. **Graceful shutdown**: 15 секунд достаточно для cleanup
+
+> **ADR**: [ADR-007](../../docs/architecture/ADR-007-validation.md) — валидация конституции
