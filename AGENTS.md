@@ -85,6 +85,7 @@ import type { Rule } from '../core/types'; // ← НЕ СУЩЕСТВУЕТ
 - TypeScript 6.x (ES2022 target, ESNext modules, `moduleResolution: bundler`) + `kafkajs` (Kafka client), `zod` (runtime validation), `jsonpath-plus` (JSONPath queries), `vitest` (testing), `testcontainers-node` + `Redpanda` (integration tests) (003-kafka-consumer)
 - N/A (Kafka-based message queue, no local persistence) (003-kafka-consumer)
 - TypeScript 6.x (ES2022 target, ESNext modules, `moduleResolution: bundler`) + kafkajs (Kafka client), zod (runtime validation), vitest (testing), testcontainers-node (integration testing), Redpanda (Kafka-compatible message broker) (005-ci-integration)
+- N/A (Kafka-based, no local persistence) (006-opencode-sdk-integration)
 
 ## Recent Changes
 - 003-kafka-consumer: Added TypeScript 6.x (ES2022 target, ESNext modules, `moduleResolution: bundler`) + `kafkajs` (Kafka client), `zod` (runtime validation), `jsonpath-plus` (JSONPath queries), `vitest` (testing), `testcontainers-node` + `Redpanda` (integration tests)
