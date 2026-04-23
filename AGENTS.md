@@ -84,6 +84,7 @@ import type { Rule } from '../core/types'; // ← НЕ СУЩЕСТВУЕТ
 ## Active Technologies
 - TypeScript 6.x (ES2022 target, ESNext modules, `moduleResolution: bundler`) + `kafkajs` (Kafka client), `zod` (runtime validation), `jsonpath-plus` (JSONPath queries), `vitest` (testing), `testcontainers-node` + `Redpanda` (integration tests) (003-kafka-consumer)
 - N/A (Kafka-based message queue, no local persistence) (003-kafka-consumer)
+- TypeScript 6.x (ES2022 target, ESNext modules, `moduleResolution: bundler`) + kafkajs (Kafka client), zod (runtime validation), vitest (testing), testcontainers-node (integration testing), Redpanda (Kafka-compatible message broker) (005-ci-integration)
 
 ## Recent Changes
 - 003-kafka-consumer: Added TypeScript 6.x (ES2022 target, ESNext modules, `moduleResolution: bundler`) + `kafkajs` (Kafka client), `zod` (runtime validation), `jsonpath-plus` (JSONPath queries), `vitest` (testing), `testcontainers-node` + `Redpanda` (integration tests)
@@ -104,6 +105,8 @@ import type { Rule } from '../core/types'; // ← НЕ СУЩЕСТВУЕТ
 2. CI/CD environment с Docker/Podman для запуска Redpanda
 3. Или исключение `consumer.ts` из coverage threshold
 
-**Файлы требующие coverage**:
-- `src/kafka/consumer.ts` — 39.82% (каждая строка требует integration test)
-- `src/core/config.ts` — 59.18% (parseConfigV003 FR-017 validation)
+## Принцип: Баги решаются сразу
+
+**ВСЕ НАЙДЕННЫЕ БАГИ И ПРОБЛЕМЫ РЕШАЕМ В ТЕКУЩЕЙ ИТЕРАЦИИ.**
+
+Если в ходе работы обнаружена ошибка (typecheck, lint, build, test, security) — она устраняется немедленно, а не выносится в technical debt. Исключение: ошибки в сторонних зависимостях или в коде, который не затрагивается текущей задачей и требует отдельной архитектурной проработки (что должно быть явно согласовано с пользователем).

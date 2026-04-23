@@ -93,6 +93,7 @@ export function getBootstrapServers(
   // Для GenericContainer нужно использовать getMappedPort
   // Но @testcontainers/redpanda предоставляет метод getBootstrapServers()
   if ('getBootstrapServers' in container) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (container as any).getBootstrapServers();
   }
 

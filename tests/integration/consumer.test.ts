@@ -128,7 +128,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
       // Получаем bootstrap servers для Kafka producer/consumer
       bootstrapServers = `PLAINTEXT://${redpandaContainer.getHost()}:${redpandaContainer.getMappedPort(9092)}`;
       console.log(`✅ Real Redpanda started: ${bootstrapServers}`);
-    } catch (error) {
+    } catch {
       // Fallback на mock контейнер если Docker недоступен
       console.warn('⚠️ Docker runtime not available, using mock container for integration tests');
       console.warn('To run tests with real Redpanda, ensure Docker/Podman is running and accessible');
@@ -346,7 +346,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
       await dlqConsumer.connect();
       await dlqConsumer.subscribe({ topic: dlqTopic, fromBeginning: true });
 
-      const dlqMessages: Array<{ envelope: any }> = [];
+      const dlqMessages: Array<{ envelope: Record<string, unknown> }> = [];
 
       await dlqConsumer.run({
         eachMessage: async (payload) => {
@@ -404,7 +404,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
       const processingTimes: number[] = [];
 
       const originalLog = console.log;
-      console.log = (...args: any[]) => {
+      console.log = (...args: unknown[]) => {
         // Проверяем лог message_processed для замера времени
         const logStr = JSON.stringify(args);
         if (logStr.includes('message_processed')) {

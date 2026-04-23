@@ -1,0 +1,4 @@
+# Скопируй в .testcontainers.properties и замени UID на свой (выполни: id -u)
+ryuk.disabled=true
+docker.host=unix:///run/user/<YOUR_UID>/podman/podman.sock
+docker.client.strategy=org.testcontainers.dockerclient.UnixSocketClientProviderStrategy

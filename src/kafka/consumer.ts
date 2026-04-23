@@ -21,9 +21,9 @@ import { createKafkaClient, createConsumer, createDlqProducer } from './client.j
 const MAX_MESSAGE_SIZE_BYTES = 1024 * 1024; // 1MB
 
 /**
- * Максимальное время для graceful shutdown (10 секунд).
+ * Максимальное время для graceful shutdown (15 секунд) (SC-008).
  */
-const SHUTDOWN_TIMEOUT_MS = 10_000; // 10 seconds
+const SHUTDOWN_TIMEOUT_MS = 15_000; // 15 seconds (SC-008)
 
 /**
  * Максимальное количество retry для broker throttle.
@@ -52,7 +52,7 @@ export type CommitOffsetsFn = (
 /**
  * Состояние consumer для отслеживания метрик и shutdown (Constitution Principle IV: No-State Consumer).
  */
-interface ConsumerState {
+export interface ConsumerState {
   isShuttingDown: boolean;
   totalMessagesProcessed: number;
   dlqMessagesCount: number;
@@ -67,7 +67,7 @@ interface ConsumerState {
  * @param state - Состояние consumer с метриками
  * @returns void
  */
-function logDlqRate(state: ConsumerState): void {
+export function logDlqRate(state: ConsumerState): void {
   const currentTime = Date.now();
   const timeSinceLastLog = currentTime - state.lastDlqRateLogTime;
 
@@ -100,7 +100,7 @@ function logDlqRate(state: ConsumerState): void {
  * @param payload - Сообщение из Kafka (eachMessage payload)
  * @returns void
  */
-function logConsumerLagMetrics(payload: EachMessagePayload): void {
+export function logConsumerLagMetrics(payload: EachMessagePayload): void {
   console.log(
     JSON.stringify({
       level: 'debug',
@@ -123,7 +123,7 @@ function logConsumerLagMetrics(payload: EachMessagePayload): void {
  * @param error - Ошибка для проверки
  * @returns true если это throttle ошибка, иначе false
  */
-function isBrokerThrottleError(error: unknown): boolean {
+export function isBrokerThrottleError(error: unknown): boolean {
   const errorMessage = error instanceof Error ? error.message : String(error);
   return (
     errorMessage.toLowerCase().includes('throttle') ||
@@ -148,7 +148,7 @@ function isBrokerThrottleError(error: unknown): boolean {
  *
  * @template T - Тип возвращаемого значения операции
  */
-async function executeWithThrottleRetry<T>(
+export async function executeWithThrottleRetry<T>(
   operation: () => Promise<T>,
   operationName: string,
 ): Promise<T> {
@@ -433,12 +433,12 @@ export async function eachMessageHandler(
  * Выполняет graceful shutdown для consumer и producer.
  *
  * SIGTERM/SIGINT → consumer.disconnect() → producer.disconnect().
- * Single timeout: 10 секунд для всего процесса shutdown (force-kill after timeout).
+ * Single timeout: 15 секунд для всего процесса shutdown (force-kill after timeout) (SC-008).
  * SIGTERM во время DLQ send: завершается отправка, затем disconnect.
  * Последовательность логируется.
  *
  * FR-026: SIGTERM/SIGINT → consumer.disconnect() → producer.disconnect();
- *         Single timeout: 10 seconds (force-kill after timeout);
+ *         Single timeout: 15 seconds (force-kill after timeout) (SC-008);
  *         SIGTERM during DLQ send: complete it, then disconnect;
  *         Sequence logged
  *
@@ -453,11 +453,12 @@ export async function eachMessageHandler(
  * await performGracefulShutdown(consumer, dlqProducer, 'SIGTERM', state);
  * ```
  */
-async function performGracefulShutdown(
+export async function performGracefulShutdown(
   consumer: Consumer,
   producer: Producer,
   signal: string,
   state: ConsumerState,
+  exitFn: (code: number) => never = process.exit as (code: number) => never,
 ): Promise<void> {
   // Защита от повторных вызовов
   if (state.isShuttingDown) {
@@ -593,7 +594,7 @@ async function performGracefulShutdown(
       }),
     );
 
-    process.exit(1);
+    exitFn(1);
   }
 }
 
@@ -606,12 +607,13 @@ async function performGracefulShutdown(
  *         Orchestrates createKafkaClient → createConsumer → createDlqProducer → eachMessageHandler
  *
  * FR-026: SIGTERM/SIGINT → consumer.disconnect() → producer.disconnect();
- *         Shutdown timeout: 10 seconds (force-kill after timeout);
+ *         Shutdown timeout: 15 seconds (force-kill after timeout) (SC-008);
  *         SIGTERM during DLQ send: complete it, then disconnect;
  *         Sequence logged
  *
  * @param config - Конфигурация плагина (PluginConfigV003)
- * @returns Promise<void> — never resolves (consumer runs until shutdown)
+ * @returns Promise<void> — resolves after successful consumer initialization;
+ *         consumer continues running in background until SIGTERM/SIGINT
  *
  * @example
  * ```ts

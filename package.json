@@ -3,14 +3,17 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "test": "vitest",
-    "test:coverage": "vitest --coverage",
-    "lint": "eslint src/**/*.ts",
+    "build": "tsc",
+    "check": "npm run lint && npm run test",
     "format": "prettier --write \"src/**/*.ts\"",
-    "check": "npm run lint && npm run test"
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test": "vitest run",
+    "test:coverage": "vitest --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "jsonpath-plus": "^9.0.0",
+    "jsonpath-plus": "^10.4.0",
     "kafkajs": "^2.2.4",
     "zod": "^3.23.8"
   },
