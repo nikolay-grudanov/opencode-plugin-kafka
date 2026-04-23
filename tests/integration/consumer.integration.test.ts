@@ -10,7 +10,7 @@
 
 import { describe, beforeAll, afterAll, it, expect, beforeEach, vi } from 'vitest';
 import { RedpandaContainer } from '@testcontainers/redpanda';
-import type { Producer, Consumer, EachMessagePayload } from 'kafkajs';
+import type { Producer, EachMessagePayload } from 'kafkajs';
 import { Kafka } from 'kafkajs';
 
 import { eachMessageHandler, performGracefulShutdown, startConsumer } from '../../src/kafka/consumer.js';
@@ -38,7 +38,7 @@ const TEST_TOPIC_2 = 'test-topic-2';
 /**
  * Стандартный JSONPath для тестов.
  */
-const DEFAULT_JSON_PATH = '$.type';
+// const DEFAULT_JSON_PATH = '$.type';
 
 /**
  * Таймаут для startup контейнера (2 минуты).
@@ -62,12 +62,12 @@ interface TestConsumerState {
 /**
  * Результат обработки сообщения для верификации.
  */
-interface ProcessingVerification {
-  processed: boolean;
-  matchedRule?: string;
-  sentToDlq: boolean;
-  error?: string;
-}
+// interface ProcessingVerification {
+//   processed: boolean;
+//   matchedRule?: string;
+//   sentToDlq: boolean;
+//   error?: string;
+// }
 
 // ============================================================================
 // Fixtures
@@ -1022,7 +1022,7 @@ describe.skipIf(!containerAvailable)('T019: startConsumer Lifecycle', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     // Act — запускаем startConsumer в фоне
-    const consumerPromise = startConsumer(testConfig);
+    startConsumer(testConfig);
 
     // Ждём подключения (логируем kafka_consumer_started)
     const connected = await waitForCondition(
@@ -1065,7 +1065,7 @@ describe.skipIf(!containerAvailable)('T019: startConsumer Lifecycle', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     // Act
-    const consumerPromise = startConsumer(testConfig);
+    startConsumer(testConfig);
 
     // Ждём выхода с ошибкой (невалидный broker)
     await waitForCondition(

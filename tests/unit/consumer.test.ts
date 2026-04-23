@@ -654,7 +654,7 @@ describe('Helper functions', () => {
           headers: {},
           timestamp: '2024-04-22T00:00:00.000Z',
         },
-      } as any;
+} as EachMessagePayload;
 
       logConsumerLagMetrics(payload);
 
@@ -709,7 +709,7 @@ describe('Helper functions', () => {
     });
 
     it('должен обрабатывать объект без message', () => {
-      const error = { code: 'ERR_THROTTLED' } as any;
+      const error = { code: 'ERR_THROTTLED' } as unknown as Error;
       expect(isBrokerThrottleError(error)).toBe(false);
     });
   });
@@ -792,7 +792,7 @@ describe('eachMessageHandler shutdown state', () => {
   let mockDlqProducer: Producer;
   let mockCommitOffsets: ReturnType<typeof vi.fn>;
   let mockConfig: PluginConfigV003;
-  let mockState: any;
+  let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -887,7 +887,7 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
   let mockDlqProducer: Producer;
   let mockCommitOffsets: ReturnType<typeof vi.fn>;
   let mockConfig: PluginConfigV003;
-  let mockState: any;
+  let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let originalEnv: NodeJS.ProcessEnv;
 
@@ -1005,12 +1005,13 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
 describe('performGracefulShutdown', () => {
   // Импортируем после моков
   let performGracefulShutdown: typeof import('../../src/kafka/consumer.js').performGracefulShutdown;
-  let mockConsumer: any;
-  let mockProducer: any;
-  let mockState: any;
+  let mockConsumer: { disconnect: ReturnType<typeof vi.fn> };
+  let mockProducer: { disconnect: ReturnType<typeof vi.fn> };
+  let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
   let processExitSpy: ReturnType<typeof vi.spyOn>;
+  let mockExit: (code: number) => never;
 
   beforeEach(async () => {
     // Моки должны быть установлены до импорта
@@ -1019,6 +1020,9 @@ describe('performGracefulShutdown', () => {
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     processExitSpy = vi.spyOn(process, 'exit').mockImplementation(vi.fn());
+
+    // Mock для exitFn параметра
+    mockExit = vi.fn() as unknown as (code: number) => never;
 
     mockState = {
       isShuttingDown: false,
@@ -1124,7 +1128,7 @@ describe('performGracefulShutdown', () => {
       () => new Promise((resolve) => setTimeout(resolve, 20_000)), // долгий disconnect
     );
 
-    const shutdownPromise = performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+    const shutdownPromise = performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState, mockExit);
 
     // Fast-forward времени
     vi.advanceTimersByTime(15_000);
@@ -1137,8 +1141,8 @@ describe('performGracefulShutdown', () => {
       // Expected to timeout
     }
 
-    // Проверяем force exit
-    expect(processExitSpy).toHaveBeenCalledWith(1);
+    // Проверяем force exit через exitFn
+    expect(mockExit).toHaveBeenCalledWith(1);
 
     vi.useRealTimers();
   });
@@ -1175,19 +1179,19 @@ describe('performGracefulShutdown', () => {
       () => new Promise((_, reject) => setTimeout(() => reject('Timeout as string'), 20_000)),
     );
 
-    const shutdownPromise = performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+    const shutdownPromise = performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState, mockExit);
 
     // Fast-forward времени до срабатывания timeout
     vi.advanceTimersByTime(25_000);
 
     try {
       await shutdownPromise;
-    } catch (e) {
+    } catch {
       // Expected: timeout error
     }
 
-    // Проверяем force exit
-    expect(processExitSpy).toHaveBeenCalledWith(1);
+    // Проверяем force exit через exitFn
+    expect(mockExit).toHaveBeenCalledWith(1);
 
     vi.useRealTimers();
   });
@@ -1205,9 +1209,19 @@ describe('startConsumer', () => {
   }));
 
   let startConsumer: typeof import('../../src/kafka/consumer.js').startConsumer;
-  let mockKafka: any;
-  let mockConsumer: any;
-  let mockDlqProducer: any;
+  let mockKafka: Record<string, unknown>;
+  let mockConsumer: {
+    connect: ReturnType<typeof vi.fn>;
+    disconnect: ReturnType<typeof vi.fn>;
+    subscribe: ReturnType<typeof vi.fn>;
+    run: ReturnType<typeof vi.fn>;
+    commitOffsets: ReturnType<typeof vi.fn>;
+  };
+  let mockDlqProducer: {
+    connect: ReturnType<typeof vi.fn>;
+    disconnect: ReturnType<typeof vi.fn>;
+    send: ReturnType<typeof vi.fn>;
+  };
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
   let processExitSpy: ReturnType<typeof vi.spyOn>;
@@ -1232,10 +1246,13 @@ describe('startConsumer', () => {
     processExitSpy = vi.spyOn(process, 'exit').mockImplementation(vi.fn());
 
     // Мокаем process.once для SIGTERM/SIGINT
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     processOnceSpy = vi.spyOn(process, 'once').mockImplementation((event: any, handler: any) => {
       if (event === 'SIGTERM' || event === 'SIGINT') {
         // Сохраняем handler для вызова позже в тесте
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (process as any)._savedHandlers = (process as any)._savedHandlers || {};
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (process as any)._savedHandlers[event] = handler;
       }
       return process;
@@ -1354,11 +1371,10 @@ describe('startConsumer', () => {
     await vi.waitFor(() => expect(mockDlqProducer.connect).toHaveBeenCalled());
     await vi.waitFor(() => expect(mockConsumer.subscribe).toHaveBeenCalled());
 
-    // Вызываем SIGTERM handler - он async, поэтому запускаем но не ждём
+    // Вызываем SIGTERM handler
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const savedHandlers = (process as any)._savedHandlers;
     if (savedHandlers && savedHandlers['SIGTERM']) {
-      // SIGTERM handler вызывает performGracefulShutdown + process.exit(0)
-      // process.exit замокан, performGracefulShutdown должен вызвать disconnect
       savedHandlers['SIGTERM']('SIGTERM');
     }
 
@@ -1380,6 +1396,7 @@ describe('startConsumer', () => {
     await vi.waitFor(() => expect(mockConsumer.subscribe).toHaveBeenCalled());
 
     // Вызываем SIGINT handler
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const savedHandlers = (process as any)._savedHandlers;
     if (savedHandlers && savedHandlers['SIGINT']) {
       savedHandlers['SIGINT']('SIGINT');
@@ -1412,6 +1429,7 @@ describe('startConsumer', () => {
 
   it('должен корректно вызвать eachMessage callback через consumer.run()', async () => {
     // Мокаем run чтобы он сразу вызвал eachMessage callback
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockConsumer.run.mockImplementationOnce((config: any) => {
       // Вызываем eachMessage callback сразу с тестовым payload
       if (config.eachMessage) {

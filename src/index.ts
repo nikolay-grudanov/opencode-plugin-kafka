@@ -36,7 +36,7 @@ import { startConsumer } from './kafka/consumer.js';
  * await plugin(context);
  * ```
  */
-export default async function plugin(context: Parameters<Plugin>[0]) {
+export default async function plugin(_context: Parameters<Plugin>[0]) {
   try {
     // 1. Парсим конфигурацию из kafka-router.json (spec 003)
     const config = parseConfigV003();

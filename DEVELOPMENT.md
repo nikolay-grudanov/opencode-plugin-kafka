@@ -52,7 +52,7 @@
 
 ```bash
 # Клонирование репозитория
-git clone https://github.com/your-org/opencode-plugin-kafka.git
+git clone https://github.com/nikolay-grudanov/opencode-plugin-kafka.git
 cd opencode-plugin-kafka
 
 # Установка зависимостей
@@ -101,6 +101,9 @@ loginctl enable-linger $(whoami)
 
 # Запуск podman.socket
 systemctl --user enable --now podman.socket
+
+# Копирование и настройка testcontainers конфигурации
+cp .testcontainers.properties.example .testcontainers.properties && sed -i "s/<YOUR_UID>/$(id -u)/" .testcontainers.properties
 
 # Проверка доступности сокета
 ls /run/user/$(id -u)/podman/podman.sock

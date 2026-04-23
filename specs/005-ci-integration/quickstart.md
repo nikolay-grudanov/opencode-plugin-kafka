@@ -73,7 +73,13 @@ systemctl --user enable --now podman.socket
 ls /run/user/$(id -u)/podman/podman.sock
 ```
 
-**Step 4: Run integration tests**:
+**Step 4: Copy and configure testcontainers properties**:
+
+```bash
+cp .testcontainers.properties.example .testcontainers.properties && sed -i "s/<YOUR_UID>/$(id -u)/" .testcontainers.properties
+```
+
+**Step 5: Run integration tests**:
 
 ```bash
 npm run test:integration

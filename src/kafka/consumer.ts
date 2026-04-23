@@ -21,9 +21,9 @@ import { createKafkaClient, createConsumer, createDlqProducer } from './client.j
 const MAX_MESSAGE_SIZE_BYTES = 1024 * 1024; // 1MB
 
 /**
- * Максимальное время для graceful shutdown (10 секунд).
+ * Максимальное время для graceful shutdown (15 секунд) (SC-008).
  */
-const SHUTDOWN_TIMEOUT_MS = 10_000; // 10 seconds
+const SHUTDOWN_TIMEOUT_MS = 15_000; // 15 seconds (SC-008)
 
 /**
  * Максимальное количество retry для broker throttle.
@@ -433,12 +433,12 @@ export async function eachMessageHandler(
  * Выполняет graceful shutdown для consumer и producer.
  *
  * SIGTERM/SIGINT → consumer.disconnect() → producer.disconnect().
- * Single timeout: 10 секунд для всего процесса shutdown (force-kill after timeout).
+ * Single timeout: 15 секунд для всего процесса shutdown (force-kill after timeout) (SC-008).
  * SIGTERM во время DLQ send: завершается отправка, затем disconnect.
  * Последовательность логируется.
  *
  * FR-026: SIGTERM/SIGINT → consumer.disconnect() → producer.disconnect();
- *         Single timeout: 10 seconds (force-kill after timeout);
+ *         Single timeout: 15 seconds (force-kill after timeout) (SC-008);
  *         SIGTERM during DLQ send: complete it, then disconnect;
  *         Sequence logged
  *
@@ -458,6 +458,7 @@ export async function performGracefulShutdown(
   producer: Producer,
   signal: string,
   state: ConsumerState,
+  exitFn: (code: number) => never = process.exit as (code: number) => never,
 ): Promise<void> {
   // Защита от повторных вызовов
   if (state.isShuttingDown) {
@@ -593,7 +594,7 @@ export async function performGracefulShutdown(
       }),
     );
 
-    process.exit(1);
+    exitFn(1);
   }
 }
 
@@ -606,12 +607,13 @@ export async function performGracefulShutdown(
  *         Orchestrates createKafkaClient → createConsumer → createDlqProducer → eachMessageHandler
  *
  * FR-026: SIGTERM/SIGINT → consumer.disconnect() → producer.disconnect();
- *         Shutdown timeout: 10 seconds (force-kill after timeout);
+ *         Shutdown timeout: 15 seconds (force-kill after timeout) (SC-008);
  *         SIGTERM during DLQ send: complete it, then disconnect;
  *         Sequence logged
  *
  * @param config - Конфигурация плагина (PluginConfigV003)
- * @returns Promise<void> — never resolves (consumer runs until shutdown)
+ * @returns Promise<void> — resolves after successful consumer initialization;
+ *         consumer continues running in background until SIGTERM/SIGINT
  *
  * @example
  * ```ts
