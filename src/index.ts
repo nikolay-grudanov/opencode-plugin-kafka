@@ -8,7 +8,7 @@
  * @see spec/003-kafka-consumer/spec.md § FR-025
  */
 
-import type { Plugin } from 'opencode-plugin';
+import type { Plugin } from './types/opencode-plugin.d.ts';
 import { parseConfigV003 } from './core/config.js';
 import { startConsumer } from './kafka/consumer.js';
 

@@ -12,7 +12,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { Kafka, type Consumer, type Producer } from 'kafkajs';
-import { kafkaEnvSchema } from '../schemas/index.js';
+import { kafkaEnvSchema, type KafkaEnv } from '../schemas/index.js';
 
 /**
  * Создаёт Kafka клиент из переменных окружения

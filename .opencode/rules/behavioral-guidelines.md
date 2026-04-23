@@ -56,4 +56,13 @@ For multi-step tasks, state a brief plan:
 3. [Step] → verify: [check]
 ```
 
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+## 5. Fix Bugs Immediately
+
+**All discovered bugs and issues are resolved in the current iteration.**
+
+When any error is found (typecheck, lint, build, test, security):
+- Do not defer it to "technical debt" or "future iterations"
+- Fix it now, as part of the current task
+- Exception: third-party dependency bugs or architectural issues requiring separate design — must be explicitly agreed upon with the user
+
+The test: If you found a bug and didn't fix it, you failed the task.
