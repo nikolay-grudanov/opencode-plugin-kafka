@@ -4,7 +4,7 @@
  * Contains schemas for two specifications:
  * - spec 002-core-refinements: RuleSchema, PluginConfigSchema (legacy, uses topic/agent)
  * - spec 003-kafka-consumer: kafkaEnvSchema, RuleV003Schema, PluginConfigV003Schema (current, uses jsonPath/promptTemplate)
- * - spec 006-opencode-sdk-integration: RuleV003Schema (enhanced, uses agentId/responseTopic/timeoutSeconds/concurrency)
+ * - spec 006-opencode-sdk-integration: RuleV003Schema (enhanced, uses agentId/responseTopic/timeoutMs/concurrency)
  */
 
 import { z } from 'zod';
@@ -109,8 +109,8 @@ export const RuleV003Schema = z.object({
   agentId: z.string().min(1, 'Agent ID is required'),
   // Топик для отправки ответа (optional)
   responseTopic: z.string().min(1, 'Response topic name is required').optional(),
-  // Таймаут выполнения агента в секундах (default: 120)
-  timeoutSeconds: z.number().int().positive('Timeout must be positive').default(120),
+  // Таймаут выполнения агента в миллисекундах (default: 120000 = 2 минуты)
+  timeoutMs: z.number().int().positive('Timeout must be positive').default(120_000),
   // Максимальное количество параллельных вызовов (default: 1, v1 — sequential)
   concurrency: z.number().int().min(1, 'Concurrency must be at least 1').max(10, 'Concurrency must be at most 10').default(1),
 });

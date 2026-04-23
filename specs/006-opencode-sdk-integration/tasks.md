@@ -40,21 +40,21 @@
 
 **Tests FIRST (Test-First Development):**
 
-- [ ] T009 [P] [US1] Написать unit tests для MockOpenCodeAgent в `tests/unit/opencode/mock-agent.test.ts` — invoke success, invoke timeout, invoke failure, abort, activeSessions tracking — FR-008
-- [ ] T010 [P] [US1] Написать unit tests для extractResponseText в `tests/unit/opencode/extract-response.test.ts` — filter type='text', join \n\n, empty parts, non-text parts — FR-007
-- [ ] T011 [P] [US1] Написать unit tests для OpenCodeAgentAdapter в `tests/unit/opencode/agent-adapter.test.ts` — mocked SDK, success flow, timeout flow (best-effort abort), error flow — FR-007
+- [x] T009 [P] [US1] Написать unit tests для MockOpenCodeAgent в `tests/unit/opencode/mock-agent.test.ts` — invoke success, invoke timeout, invoke failure, abort, activeSessions tracking — FR-008
+- [x] T010 [P] [US1] Написать unit tests для extractResponseText в `tests/unit/opencode/extract-response.test.ts` — filter type='text', join \n\n, empty parts, non-text parts — FR-007
+- [x] T011 [P] [US1] Написать unit tests для OpenCodeAgentAdapter в `tests/unit/opencode/agent-adapter.test.ts` — mocked SDK, success flow, timeout flow (best-effort abort), error flow — FR-007
 
 **Implementation:**
 
-- [ ] T012 [US1] Создать `src/opencode/MockOpenCodeAgent.ts` — MockConfig {responses, delayMs, shouldFail, shouldTimeout}, activeSessions Set — FR-008
-- [ ] T013 [US1] Создать `src/opencode/OpenCodeAgentAdapter.ts` — create session, prompt, Promise.race timeout, extractResponseText (filter text, join \n\n), best-effort abort — FR-007
-- [ ] T014 [P] [US1] Написать unit tests для sendResponse в `tests/unit/kafka/response-producer.test.ts` — success send, Kafka message keyed by sessionId, allowAutoTopicCreation: false — FR-014
-- [ ] T015 [US1] Создать `src/kafka/response-producer.ts` — sendResponse(producer, topic, ResponseMessage), key by sessionId, never throws — FR-014
-- [ ] T016 [US1] Обновить `src/kafka/client.ts` — добавить createResponseProducer(kafka): Producer с allowAutoTopicCreation: false — FR-010
-- [ ] T017 [P] [US1] Написать unit tests для eachMessageHandler в `tests/unit/consumer.test.ts` — success invoke → response sent, timeout → DLQ, agent error → DLQ, no match → skip, tombstone → skip, oversized → DLQ, parse error → DLQ, response send failure → log + commit — NFR-003
-- [ ] T018 [US1] Обновить `src/kafka/consumer.ts` — eachMessageHandler 10-step pipeline (tombstone → size → parse → match → build → invoke → response/DLQ → commit), add activeSessions parameter, ConsumerState tracking (isShuttingDown, totalMessagesProcessed, dlqMessagesCount, lastDlqRateLogTime), MAX_MESSAGE_SIZE validation (1_048_576 bytes), JSON.stringify structured logging — FR-013, FR-018, FR-019, FR-020
-- [ ] T019 [US1] Обновить `src/core/config.ts` — добавить FR-017 topic coverage validation. Создать функцию validateTopicCoverage(config: PluginConfigV003): void, которая проверяет что responseTopic не совпадает ни с одним input topic. Если совпадает — throw Error — FR-002, FR-017
-- [ ] T020 [US1] Обновить `src/index.ts` — plugin() entry point: instantiate OpenCodeAgentAdapter(ctx.client), pass to startConsumer, return session.error hook — FR-001
+- [x] T012 [US1] Создать `src/opencode/MockOpenCodeAgent.ts` — MockConfig {responses, delayMs, shouldFail, shouldTimeout}, activeSessions Set — FR-008
+- [x] T013 [US1] Создать `src/opencode/OpenCodeAgentAdapter.ts` — create session, prompt, Promise.race timeout, extractResponseText (filter text, join \n\n), best-effort abort — FR-007
+- [x] T014 [P] [US1] Написать unit tests для sendResponse в `tests/unit/kafka/response-producer.test.ts` — success send, Kafka message keyed by sessionId, allowAutoTopicCreation: false — FR-014
+- [x] T015 [US1] Создать `src/kafka/response-producer.ts` — sendResponse(producer, topic, ResponseMessage), key by sessionId, never throws — FR-014
+- [x] T016 [US1] Обновить `src/kafka/client.ts` — добавить createResponseProducer(kafka): Producer с allowAutoTopicCreation: false — FR-010
+- [x] T017 [P] [US1] Написать unit tests для eachMessageHandler в `tests/unit/consumer.test.ts` — success invoke → response sent, timeout → DLQ, agent error → DLQ, no match → skip, tombstone → skip, oversized → DLQ, parse error → DLQ, response send failure → log + commit — NFR-003
+- [x] T018 [US1] Обновить `src/kafka/consumer.ts` — eachMessageHandler 10-step pipeline (tombstone → size → parse → match → build → invoke → response/DLQ → commit), add activeSessions parameter, ConsumerState tracking (isShuttingDown, totalMessagesProcessed, dlqMessagesCount, lastDlqRateLogTime), MAX_MESSAGE_SIZE validation (1_048_576 bytes), JSON.stringify structured logging — FR-013, FR-018, FR-019, FR-020
+- [x] T019 [US1] Обновить `src/core/config.ts` — добавить FR-017 topic coverage validation. Создать функцию validateTopicCoverage(config: PluginConfigV003): void, которая проверяет что responseTopic не совпадает ни с одним input topic. Если совпадает — throw Error — FR-002, FR-017
+- [x] T020 [US1] Обновить `src/index.ts` — plugin() entry point: instantiate OpenCodeAgentAdapter(ctx.client), pass to startConsumer, return session.error hook — FR-001
 
 **Checkpoint**: US1 functional — Kafka message → agent → response. All unit tests pass.
 
@@ -67,12 +67,12 @@
 
 **Tests FIRST:**
 
-- [ ] T021 [P] [US2] Написать unit tests для DLQ error handling в `tests/unit/consumer.test.ts` (дополнить) — parse error → DLQ envelope correct, timeout → DLQ envelope correct, agent error → DLQ envelope correct, DLQ send failure → log (no throw) — FR-015
+- [x] T021 [P] [US2] Написать unit tests для DLQ error handling в `tests/unit/consumer.test.ts` (дополнить) — parse error → DLQ envelope correct, timeout → DLQ envelope correct, agent error → DLQ envelope correct, DLQ send failure → log (no throw) — FR-015
 
 **Implementation:**
 
-- [ ] T022 [US2] Верифицировать `src/kafka/dlq.ts` — sendToDlq envelope format {originalTopic, partition, offset, errorMessage, timestamp, originalValue}, never throws — FR-015
-- [ ] T023 [US2] Интегрировать DLQ в eachMessageHandler — все error paths ведут в DLQ, commit offset после DLQ send, responseTopic НЕ получает errors — FR-013, NFR-004
+- [x] T022 [US2] Верифицировать `src/kafka/dlq.ts` — sendToDlq envelope format {originalTopic, partition, offset, errorMessage, timestamp, originalValue}, never throws — FR-015
+- [x] T023 [US2] Интегрировать DLQ в eachMessageHandler — все error paths ведут в DLQ, commit offset после DLQ send, responseTopic НЕ получает errors — FR-013, NFR-004
 
 **Checkpoint**: US2 functional — все ошибки → DLQ, offset всегда commit.
 
@@ -85,12 +85,12 @@
 
 **Tests FIRST:**
 
-- [ ] T024 [P] [US3] Написать unit tests для graceful shutdown в `tests/unit/consumer.test.ts` (дополнить) — shutdown with active sessions → all aborted, shutdown with no sessions → clean, 15s timeout exceeded → log warning — FR-016
+- [x] T024 [P] [US3] Написать unit tests для graceful shutdown в `tests/unit/consumer.test.ts` (дополнить) — shutdown with active sessions → all aborted, shutdown with no sessions → clean, 15s timeout exceeded → log warning — FR-016
 
 **Implementation:**
 
-- [ ] T025 [US3] Обновить performGracefulShutdown в `src/kafka/consumer.ts` — Promise.allSettled(abort activeSessions), disconnect consumer, dlqProducer, responseProducer, 15s total timeout (forced exit with code 1 if exceeded) — FR-016
-- [ ] T026 [US3] Обновить startConsumer в `src/kafka/consumer.ts` — передать agent и responseProducer, инициализировать response producer, SIGTERM/SIGINT handlers — FR-013, FR-016
+- [x] T025 [US3] Обновить performGracefulShutdown в `src/kafka/consumer.ts` — Promise.allSettled(abort activeSessions), disconnect consumer, dlqProducer, responseProducer, 15s total timeout (forced exit with code 1 if exceeded) — FR-016
+- [x] T026 [US3] Обновить startConsumer в `src/kafka/consumer.ts` — передать agent и responseProducer, инициализировать response producer, SIGTERM/SIGINT handlers — FR-013, FR-016
 
 **Checkpoint**: US3 functional — graceful shutdown корректно завершает все ресурсы.
 
@@ -98,17 +98,17 @@
 
 ## Phase 6: Integration Tests
 
-- [ ] T027 Написать integration test `tests/integration/kafka-opencode.test.ts` — Redpanda + MockOpenCodeAgent: success flow, timeout flow, error flow, tombstone, no match — NFR-002, NFR-003
+- [x] T027 Написать integration test `tests/integration/kafka-opencode.test.ts` — Redpanda + MockOpenCodeAgent: success flow, timeout flow, error flow, tombstone, no match — NFR-002, NFR-003
 
 ---
 
 ## Phase 7: Validation & Polish
 
-- [ ] T028 Запустить `npm run check` — lint + test все проходят
-- [ ] T029 Запустить `npm run test:coverage` — проверить ≥90% coverage
-- [ ] T030 [P] Проверить no `any` types в codebase
-- [ ] T031 [P] Проверить structured logging (JSON.stringify, FR-019) во всех production paths
-- [ ] T032 Запустить kafka-constitution-compliance agent для проверки всех 5 принципов
+- [x] T028 Запустить `npm run check` — lint + test все проходят
+- [x] T029 Запустить `npm run test:coverage` — проверить ≥90% coverage
+- [x] T030 [P] Проверить no `any` types в codebase
+- [x] T031 [P] Проверить structured logging (JSON.stringify, FR-019) во всех production paths
+- [x] T032 Запустить kafka-constitution-compliance agent для проверки всех 5 принципов
 
 ---
 

@@ -531,4 +531,115 @@ describe('sendToDlq', () => {
       expect(failedAtDate.getTime()).toBeLessThanOrEqual(afterCall + 1000);
     });
   });
+
+  describe('sanitizeErrorMessage', () => {
+    it('должен маскировать пароли в error message', async () => {
+      const originalMessage = {
+        value: '{"test": "value"}',
+        topic: 'test-topic',
+        partition: 0,
+        offset: '42',
+      };
+      const error = new Error('Connection failed: password=secret123');
+
+      await sendToDlq(mockProducer, originalMessage, error);
+
+      const sendCall = vi.mocked(mockProducer.send).mock.calls[0];
+      const envelope = JSON.parse(sendCall[0].messages[0].value as string);
+
+      // Проверяем что пароль замаскирован
+      expect(envelope.errorMessage).toContain('password=***');
+      expect(envelope.errorMessage).not.toContain('secret123');
+    });
+
+    it('должен маскировать токены в error message', async () => {
+      const originalMessage = {
+        value: '{"test": "value"}',
+        topic: 'test-topic',
+        partition: 0,
+        offset: '42',
+      };
+      const error = new Error('Auth failed: token=abc123xyz');
+
+      await sendToDlq(mockProducer, originalMessage, error);
+
+      const sendCall = vi.mocked(mockProducer.send).mock.calls[0];
+      const envelope = JSON.parse(sendCall[0].messages[0].value as string);
+
+      expect(envelope.errorMessage).toContain('token=***');
+      expect(envelope.errorMessage).not.toContain('abc123xyz');
+    });
+
+    it('должен маскировать API ключи в error message', async () => {
+      const originalMessage = {
+        value: '{"test": "value"}',
+        topic: 'test-topic',
+        partition: 0,
+        offset: '42',
+      };
+      const error = new Error('API error: api_key=sk-1234567890abcdef');
+
+      await sendToDlq(mockProducer, originalMessage, error);
+
+      const sendCall = vi.mocked(mockProducer.send).mock.calls[0];
+      const envelope = JSON.parse(sendCall[0].messages[0].value as string);
+
+      expect(envelope.errorMessage).toContain('api_key=***');
+      expect(envelope.errorMessage).not.toContain('sk-1234567890abcdef');
+    });
+
+    it('должен маскировать secret в error message', async () => {
+      const originalMessage = {
+        value: '{"test": "value"}',
+        topic: 'test-topic',
+        partition: 0,
+        offset: '42',
+      };
+      const error = new Error('Config error: secret=supersecret');
+
+      await sendToDlq(mockProducer, originalMessage, error);
+
+      const sendCall = vi.mocked(mockProducer.send).mock.calls[0];
+      const envelope = JSON.parse(sendCall[0].messages[0].value as string);
+
+      expect(envelope.errorMessage).toContain('secret=***');
+      expect(envelope.errorMessage).not.toContain('supersecret');
+    });
+
+    it('должен ограничивать длину error message до 1000 символов', async () => {
+      const originalMessage = {
+        value: '{"test": "value"}',
+        topic: 'test-topic',
+        partition: 0,
+        offset: '42',
+      };
+      // Создаём очень длинное сообщение
+      const longError = new Error('Error: ' + 'x'.repeat(2000));
+
+      await sendToDlq(mockProducer, originalMessage, longError);
+
+      const sendCall = vi.mocked(mockProducer.send).mock.calls[0];
+      const envelope = JSON.parse(sendCall[0].messages[0].value as string);
+
+      // Проверяем что длина ограничена
+      expect(envelope.errorMessage.length).toBeLessThanOrEqual(1000);
+    });
+
+    it('должен сохранять обычные сообщения без чувствительных данных', async () => {
+      const originalMessage = {
+        value: '{"test": "value"}',
+        topic: 'test-topic',
+        partition: 0,
+        offset: '42',
+      };
+      const error = new Error('Failed to parse JSON: unexpected token');
+
+      await sendToDlq(mockProducer, originalMessage, error);
+
+      const sendCall = vi.mocked(mockProducer.send).mock.calls[0];
+      const envelope = JSON.parse(sendCall[0].messages[0].value as string);
+
+      expect(envelope.errorMessage).toBe('Failed to parse JSON: unexpected token');
+    });
+  });
 });

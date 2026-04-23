@@ -23,12 +23,24 @@ export class TimeoutError extends Error {
  */
 export class AgentError extends Error {
   public override readonly name = 'AgentError';
-  public readonly originalError?: Error;
+  public readonly originalError?: unknown;
 
-  constructor(message: string, originalError?: Error) {
+  constructor(message: string, originalError?: unknown) {
     super(message);
     // Восстановление прототипа для instanceof в ES2022
     Object.setPrototypeOf(this, AgentError.prototype);
     this.originalError = originalError;
+  }
+
+  /**
+   * Возвращает сообщение оригинальной ошибки.
+   *
+   * @returns сообщение оригинальной ошибки или undefined если originalError отсутствует
+   */
+  getOriginalErrorMessage(): string | undefined {
+    if (!this.originalError) return undefined;
+    return this.originalError instanceof Error
+      ? this.originalError.message
+      : String(this.originalError);
   }
 }

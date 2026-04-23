@@ -8,9 +8,10 @@
  * @see spec/003-kafka-consumer/spec.md § FR-025
  */
 
-import type { Plugin } from './types/opencode-plugin.d.ts';
+import type { PluginContext, PluginHooks } from './types/opencode-plugin.d.ts';
 import { parseConfigV003 } from './core/config.js';
 import { startConsumer } from './kafka/consumer.js';
+import { OpenCodeAgentAdapter } from './opencode/OpenCodeAgentAdapter.js';
 
 /**
  * Plugin entry point for OpenCode Kafka Router plugin.
@@ -36,13 +37,16 @@ import { startConsumer } from './kafka/consumer.js';
  * await plugin(context);
  * ```
  */
-export default async function plugin(_context: Parameters<Plugin>[0]) {
+export default async function plugin(context: PluginContext): Promise<PluginHooks> {
   try {
     // 1. Парсим конфигурацию из kafka-router.json (spec 003)
     const config = parseConfigV003();
 
-    // 2. Запускаем Kafka consumer (возвращает после init, не после shutdown)
-    await startConsumer(config);
+    // 2. Создаём адаптер для OpenCode агентов из SDK клиента
+    const agent = new OpenCodeAgentAdapter(context.client);
+
+    // 3. Запускаем Kafka consumer (возвращает после init, не после shutdown)
+    await startConsumer(config, agent);
 
     // Возвращаем пустой объект hooks (нет необходимости подписываться на события)
     // Этот плагин запускается как standalone consumer

@@ -111,6 +111,36 @@ describe('AgentError', () => {
     const wrapped = new AgentError('Session creation failed', rootCause);
 
     expect(wrapped.originalError).toBeInstanceOf(TypeError);
-    expect(wrapped.originalError?.message).toContain('Cannot read property');
+    expect(wrapped.originalError).toBe(rootCause);
+  });
+
+  it('сохраняет originalError когда передан non-Error объект', () => {
+    const original = { code: 'ERR_SDK', message: 'Custom error' };
+    const error = new AgentError('Agent failed', original);
+
+    expect(error.originalError).toBe(original);
+    expect(error.getOriginalErrorMessage()).toBe('[object Object]');
+  });
+
+  it('сохраняет originalError когда передан примитив string', () => {
+    const original = 'string error';
+    const error = new AgentError('Agent failed', original);
+
+    expect(error.originalError).toBe(original);
+    expect(error.getOriginalErrorMessage()).toBe('string error');
+  });
+
+  it('сохраняет originalError когда передан null', () => {
+    const original = null;
+    const error = new AgentError('Agent failed', original);
+
+    expect(error.originalError).toBeNull();
+    expect(error.getOriginalErrorMessage()).toBeUndefined();
+  });
+
+  it('getOriginalErrorMessage возвращает undefined когда originalError отсутствует', () => {
+    const error = new AgentError('Agent failed');
+
+    expect(error.getOriginalErrorMessage()).toBeUndefined();
   });
 });

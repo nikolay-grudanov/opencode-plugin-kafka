@@ -13,38 +13,24 @@
 
 /**
  * Часть сообщения - объединение различных типов контента.
+ * Согласно спецификации: type: 'text' | 'code' | 'image' | 'file'
  */
-export type MessagePart =
-  | TextMessagePart
-  | ToolCallMessagePart
-  | ToolResultMessagePart;
+export interface MessagePart {
+  type: 'text' | 'code' | 'image' | 'file';
+  text?: string;
+  code?: string;
+  language?: string;
+  filePath?: string;
+  [key: string]: unknown;
+}
 
 /**
- * Текстовая часть сообщения.
+ * Текстовая часть сообщения (alias для обратной совместимости).
+ * @deprecated Используйте MessagePart с type: 'text'
  */
 export interface TextMessagePart {
   type: 'text';
   text: string;
-}
-
-/**
- * Вызов инструмента.
- */
-export interface ToolCallMessagePart {
-  type: 'tool-call';
-  toolCallId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-}
-
-/**
- * Результат выполнения инструмента.
- */
-export interface ToolResultMessagePart {
-  type: 'tool-result';
-  toolCallId: string;
-  result: unknown;
-  isError?: boolean;
 }
 
 /**

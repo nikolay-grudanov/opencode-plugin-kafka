@@ -8,6 +8,41 @@
 import type { SDKClient } from './opencode-sdk.js';
 
 // ============================================================================
+// Project
+// ============================================================================
+
+/**
+ * Информация о проекте OpenCode.
+ */
+export interface Project {
+  /** ID проекта */
+  id: string;
+  /** Имя проекта */
+  name: string;
+  /** Путь к проекту */
+  path: string;
+  /** Информация о git репозитории */
+  repository?: {
+    provider: 'github' | 'gitlab' | 'bitbucket';
+    owner: string;
+    repo: string;
+    branch: string;
+  };
+}
+
+// ============================================================================
+// BunShell
+// ============================================================================
+
+/**
+ * Bun shell API для выполнения команд.
+ */
+export interface BunShell {
+  /** Выполнить shell команду */
+  $: (command: string) => Promise<string>;
+}
+
+// ============================================================================
 // Plugin Context
 // ============================================================================
 
@@ -21,13 +56,13 @@ export interface PluginContext {
   /** OpenCode SDK клиент — типизированный доступ к session API */
   client: SDKClient;
   /** Метаданные проекта */
-  project: unknown;
+  project: Project;
   /** Рабочая директория (cwd) */
   directory: string;
   /** Git root */
   worktree: string;
   /** Bun shell API */
-  $: unknown;
+  $: BunShell;
 }
 
 // ============================================================================

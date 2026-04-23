@@ -332,5 +332,20 @@ describe('buildPromptV003', () => {
 
       expect(result).toBe('Process this payload');
     });
+
+    it('should return fallback when jsonPath parameter is invalid and throws during query', () => {
+      // Этот тест покрывает catch block (lines 122-123) когда JSONPath.query() выбрасывает исключение
+      // Для невалидного JSONPath в promptTemplate (не в jsonPath параметре) возвращается fallback
+      const payload = { status: 'active' };
+      const rule: RuleV003 = {
+        name: 'invalid-placeholder',
+        jsonPath: '$.status',
+        promptTemplate: 'Value: ${[[invalid}', // Невалидный placeholder - синтаксическая ошибка в самом шаблоне
+      };
+
+      const result = buildPromptV003(rule, payload);
+
+      expect(result).toBe('Process this payload');
+    });
   });
 });

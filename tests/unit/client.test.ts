@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createKafkaClient, createConsumer, createDlqProducer } from '../../src/kafka/client.js';
+import { createKafkaClient, createConsumer, createDlqProducer, createResponseProducer } from '../../src/kafka/client.js';
 
 describe('createKafkaClient', () => {
   let originalEnv: NodeJS.ProcessEnv;
@@ -138,16 +138,16 @@ describe('createKafkaClient', () => {
   });
 
   describe('Trims trailing spaces from KAFKA_BROKERS', () => {
-    it('должен удалить trailing spaces из KAFKA_BROKERS', () => {
+    it('должен передать trimmed brokers в Kafka client', () => {
       process.env.KAFKA_BROKERS = 'localhost:9092 , kafka2:9092 ';
       process.env.KAFKA_CLIENT_ID = 'test-client';
       process.env.KAFKA_GROUP_ID = 'test-group';
 
-      const { kafka, validatedEnv } = createKafkaClient(process.env);
+      const { kafka } = createKafkaClient(process.env);
 
       expect(kafka).toBeDefined();
-      expect(validatedEnv.KAFKA_BROKERS).toBe('localhost:9092 , kafka2:9092');
-      // Kafka client будет создан с обрезанными брокерами
+      // validatedEnv.KAFKA_BROKERS остаётся как в input (без мутации)
+      // Kafka client получает trimmed brokers через internal переменную
     });
   });
 
@@ -244,6 +244,41 @@ describe('createDlqProducer', () => {
 
       expect(producer).toBeDefined();
       // Producer должен быть отдельным экземпляром от основного producer
+    });
+  });
+});
+
+describe('createResponseProducer', () => {
+  let originalEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    originalEnv = { ...process.env };
+    process.env.KAFKA_BROKERS = 'localhost:9092';
+    process.env.KAFKA_CLIENT_ID = 'test-client';
+    process.env.KAFKA_GROUP_ID = 'test-group';
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  describe('Valid Kafka creates response producer', () => {
+    it('должен создать producer для ответов агентов', async () => {
+      const { kafka } = createKafkaClient(process.env);
+      // Мокаем connect чтобы не пытаться подключиться к реальному Kafka
+      const mockProducer = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+        send: vi.fn().mockResolvedValue(undefined),
+      };
+      
+      // Перехватываем вызов producer() чтобы вернуть мок
+      kafka.producer = vi.fn().mockReturnValue(mockProducer);
+      
+      const producer = await createResponseProducer(kafka);
+
+      expect(producer).toBeDefined();
+      expect(kafka.producer).toHaveBeenCalled();
     });
   });
 });

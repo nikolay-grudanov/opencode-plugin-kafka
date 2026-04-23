@@ -148,3 +148,42 @@ describe('IOpenCodeAgent — типы и интерфейсы', () => {
     });
   });
 });
+
+/**
+ * Edge cases и инварианты (MAJOR M4)
+ */
+describe('AgentResult — инварианты', () => {
+  it('разрешает executionTimeMs = 0 (boundary case)', () => {
+    const result: AgentResult = {
+      status: 'success',
+      sessionId: 'sess_test',
+      executionTimeMs: 0,
+      timestamp: new Date().toISOString(),
+    };
+    expect(result.executionTimeMs).toBe(0);
+  });
+
+  it('содержит валидный ISO timestamp', () => {
+    const result: AgentResult = {
+      status: 'success',
+      sessionId: 'sess_test',
+      executionTimeMs: 100,
+      timestamp: new Date().toISOString(),
+    };
+    const parsed = Date.parse(result.timestamp);
+    expect(parsed).not.toBeNaN();
+  });
+
+  it('разрешает все варианты AgentStatus', () => {
+    const statuses: AgentStatus[] = ['success', 'error', 'timeout'];
+    statuses.forEach((status) => {
+      const result: AgentResult = {
+        status,
+        sessionId: 'sess_test',
+        executionTimeMs: 100,
+        timestamp: new Date().toISOString(),
+      };
+      expect(result.status).toBe(status);
+    });
+  });
+});
