@@ -23,11 +23,11 @@
 
 **⚠️ CRITICAL: No user story work can begin until this phase is complete**
 
-- [ ] T004 [P] Обновить `src/schemas/index.ts` — расширить RuleV003Schema с agentId (required), responseTopic (optional), timeoutSeconds (default 120), concurrency (default 1) — FR-003
-- [ ] T005 [P] Создать `src/opencode/IOpenCodeAgent.ts` — interface IOpenCodeAgent {invoke, abort}, InvokeOptions, AgentResult — FR-006
-- [ ] T006 [P] Создать `src/opencode/AgentError.ts` — class TimeoutError extends Error, class AgentError extends Error — FR-009
-- [ ] T007 [P] Написать unit tests для IOpenCodeAgent types в `tests/unit/opencode/interfaces.test.ts` — verify interfaces compile and types are correct
-- [ ] T008 [P] Написать unit tests для AgentError в `tests/unit/opencode/agent-error.test.ts` — verify error classes (name, message, originalError)
+- [x] T004 [P] Обновить `src/schemas/index.ts` — расширить RuleV003Schema с agentId (required), responseTopic (optional), timeoutSeconds (default 120), concurrency (default 1) — FR-003
+- [x] T005 [P] Создать `src/opencode/IOpenCodeAgent.ts` — interface IOpenCodeAgent {invoke, abort}, InvokeOptions, AgentResult — FR-006
+- [x] T006 [P] Создать `src/opencode/AgentError.ts` — class TimeoutError extends Error, class AgentError extends Error — FR-009
+- [x] T007 [P] Написать unit tests для IOpenCodeAgent types в `tests/unit/opencode/interfaces.test.ts` — verify interfaces compile and types are correct
+- [x] T008 [P] Написать unit tests для AgentError в `tests/unit/opencode/agent-error.test.ts` — verify error classes (name, message, originalError)
 
 **Checkpoint**: Foundation ready — types, schemas, interfaces defined. Tests pass.
 
