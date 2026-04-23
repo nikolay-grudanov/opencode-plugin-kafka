@@ -39,7 +39,7 @@
 
 2. **Given** OpenCode агент вернул ответ "Vulnerability found in libfoo.so", **When** правило содержит `responseTopic: "output-topic"`, **Then** ответ отправляется в Kafka топик "output-topic" с форматом `{sessionId, ruleName, agentId, messageKey, response, status, executionTimeMs, timestamp}`
 
-3. **Given** OpenCode агент timed out (120s по умолчанию), **When** timeout истёк, **Then** best-effort abort сессии → сообщение уходит в DLQ с ошибкой "Agent timeout after 120s"
+3. **Given** OpenCode агент timed out (120s по умолчанию), **When** timeout истёк, **Then** best-effort abort сессии (log warning if abort fails, session may leak, continue cleanup) → сообщение уходит в DLQ с ошибкой "Agent timeout after 120s"
 
 4. **Given** Конфигурация содержит невалидный `agentId: ""`, **When** плагин стартует, **Then** ошибка валидации "Agent ID is required" падает immediately (fail-fast)
 
@@ -85,7 +85,7 @@
 
 ### Edge Cases
 
-- **Tombstone message (null value)**: По умолчанию отправляется в DLQ. Если `KAFKA_IGNORE_TOMBSTONES=true` → commit без обработки.
+- **Tombstone message (null value)**: Default behavior → отправляется в DLQ. Если `KAFKA_IGNORE_TOMBSTONES=true` → commit без обработки.
 - **Message exceeds MAX_MESSAGE_SIZE (1MB)**: Отправляется в DLQ с ошибкой размера.
 - **No matching rule**: Логируется "no rule matched" → commit offset → continue.
 - **Response send failure**: Логируется error → commit offset делается (ответ не critical для обработки Kafka сообщения).
@@ -106,7 +106,7 @@
 | FR-004 | `src/types/opencode-sdk.d.ts` | SDK Type Declarations | `SDKClient`, `SessionsAPI`, `Session`, `AssistantMessage`, `MessagePart` — минимальные типы только для используемых методов |
 | FR-005 | `src/types/opencode-plugin.d.ts` | PluginContext Type | `{client, project, directory, worktree, $}` — структура контекста от OpenCode |
 | FR-006 | `src/opencode/IOpenCodeAgent.ts` | IOpenCodeAgent Interface | `invoke(prompt, agentId, options)` + `abort(sessionId)` — mockable интерфейс |
-| FR-007 | `src/opencode/OpenCodeAgentAdapter.ts` | OpenCodeAgentAdapter | create session → prompt → race с timeout → extractResponseText → delete session. Best-effort abort на timeout |
+| FR-007 | `src/opencode/OpenCodeAgentAdapter.ts` | OpenCodeAgentAdapter | create session → prompt → race с timeout → extractResponseText → delete session. Best-effort abort на timeout (log warning if abort fails, session may leak, continue cleanup) |
 | FR-008 | `src/opencode/MockOpenCodeAgent.ts` | MockOpenCodeAgent | MockConfig: `{responses, delayMs, shouldFail, shouldTimeout}` — для unit tests |
 | FR-009 | `src/opencode/AgentError.ts` | AgentError Classes | `TimeoutError`, `AgentError` — кастомные классы ошибок |
 | FR-010 | `src/kafka/client.ts` | Kafka Client | `createKafkaClient`, `createConsumer`, `createDlqProducer`, `createResponseProducer` — factory functions |
@@ -524,7 +524,8 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
     // 4. Извлекаем текст: client.session.messages()
     // 5. Удаляем сессию: client.session.delete()
     // 6. Возвращаем AgentResult
-    // При timeout: best-effort abort, return status: 'timeout'
+    // При timeout: best-effort abort (log warning if abort fails, session may leak,
+// continue cleanup), return status: 'timeout'
     // При error: return status: 'error'
   }
   

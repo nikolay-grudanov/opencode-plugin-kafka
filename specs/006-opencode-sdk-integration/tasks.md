@@ -52,8 +52,8 @@
 - [ ] T015 [US1] Создать `src/kafka/response-producer.ts` — sendResponse(producer, topic, ResponseMessage), key by sessionId, never throws — FR-014
 - [ ] T016 [US1] Обновить `src/kafka/client.ts` — добавить createResponseProducer(kafka): Producer с allowAutoTopicCreation: false — FR-010
 - [ ] T017 [P] [US1] Написать unit tests для eachMessageHandler в `tests/unit/consumer.test.ts` — success invoke → response sent, timeout → DLQ, agent error → DLQ, no match → skip, tombstone → skip, oversized → DLQ, parse error → DLQ, response send failure → log + commit — NFR-003
-- [ ] T018 [US1] Обновить `src/kafka/consumer.ts` — eachMessageHandler 10-step pipeline (tombstone → size → parse → match → build → invoke → response/DLQ → commit), add activeSessions parameter — FR-013, FR-018, FR-020
-- [ ] T019 [US1] Обновить `src/core/config.ts` — добавить FR-017 topic coverage validation (responseTopic ≠ input topics) — FR-002, FR-017
+- [ ] T018 [US1] Обновить `src/kafka/consumer.ts` — eachMessageHandler 10-step pipeline (tombstone → size → parse → match → build → invoke → response/DLQ → commit), add activeSessions parameter, ConsumerState tracking (isShuttingDown, totalMessagesProcessed, dlqMessagesCount, lastDlqRateLogTime), MAX_MESSAGE_SIZE validation (1_048_576 bytes), JSON.stringify structured logging — FR-013, FR-018, FR-019, FR-020
+- [ ] T019 [US1] Обновить `src/core/config.ts` — добавить FR-017 topic coverage validation. Создать функцию validateTopicCoverage(config: PluginConfigV003): void, которая проверяет что responseTopic не совпадает ни с одним input topic. Если совпадает — throw Error — FR-002, FR-017
 - [ ] T020 [US1] Обновить `src/index.ts` — plugin() entry point: instantiate OpenCodeAgentAdapter(ctx.client), pass to startConsumer, return session.error hook — FR-001
 
 **Checkpoint**: US1 functional — Kafka message → agent → response. All unit tests pass.
@@ -89,7 +89,7 @@
 
 **Implementation:**
 
-- [ ] T025 [US3] Обновить performGracefulShutdown в `src/kafka/consumer.ts` — Promise.allSettled(abort activeSessions), disconnect consumer, dlqProducer, responseProducer, 15s total timeout — FR-016
+- [ ] T025 [US3] Обновить performGracefulShutdown в `src/kafka/consumer.ts` — Promise.allSettled(abort activeSessions), disconnect consumer, dlqProducer, responseProducer, 15s total timeout (forced exit with code 1 if exceeded) — FR-016
 - [ ] T026 [US3] Обновить startConsumer в `src/kafka/consumer.ts` — передать agent и responseProducer, инициализировать response producer, SIGTERM/SIGINT handlers — FR-013, FR-016
 
 **Checkpoint**: US3 functional — graceful shutdown корректно завершает все ресурсы.
@@ -98,7 +98,7 @@
 
 ## Phase 6: Integration Tests
 
-- [ ] T027 [P] Написать integration test `tests/integration/kafka-opencode.test.ts` — Redpanda + MockOpenCodeAgent: success flow, timeout flow, error flow, tombstone, no match — NFR-002, NFR-003
+- [ ] T027 Написать integration test `tests/integration/kafka-opencode.test.ts` — Redpanda + MockOpenCodeAgent: success flow, timeout flow, error flow, tombstone, no match — NFR-002, NFR-003
 
 ---
 
