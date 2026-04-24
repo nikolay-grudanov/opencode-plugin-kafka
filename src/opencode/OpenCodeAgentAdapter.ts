@@ -55,20 +55,25 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
       }
 
       // 4. Создаём промисы для race: timeout и abort signal
-      const { promise: timeoutPromise, clear: clearTimeout } = this.createTimeoutPromise(timeoutMs);
-      const signalPromise = this.createSignalPromise(options.signal);
-      const response = await Promise.race([
-        this.client.session.prompt({
-          path: { id: sessionId },
-          body: {
-            parts: [{ type: 'text', text: prompt }],
-            agent: agentId,
-          },
-        }),
-        timeoutPromise,
-        signalPromise,
-      ]);
-      clearTimeout();
+      const { promise: timeoutPromise, clear: cleanupTimeout } = this.createTimeoutPromise(timeoutMs);
+      const { promise: signalPromise, clear: cleanupSignal } = this.createSignalPromise(options.signal);
+      let response;
+      try {
+        response = await Promise.race([
+          this.client.session.prompt({
+            path: { id: sessionId },
+            body: {
+              parts: [{ type: 'text', text: prompt }],
+              agent: agentId,
+            },
+          }),
+          timeoutPromise,
+          signalPromise,
+        ]);
+      } finally {
+        cleanupTimeout();
+        cleanupSignal();
+      }
 
       // 5. Извлекаем текст из ответа
       const parts = response?.parts ?? [];
@@ -166,21 +171,26 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
   /**
    * Создаёт Promise который отклоняется при abort signal (C2).
    * Используется для Promise.race с prompt.
+   * Возвращает объект с promise и функцией очистки слушателя.
    */
-  private createSignalPromise(signal?: AbortSignal): Promise<never> {
-    return new Promise<never>((_, reject) => {
-      if (!signal) {
-        // Без signal — никогда не отклоняем
-        return;
-      }
-      if (signal.aborted) {
-        reject(new AgentError('Operation was aborted'));
-        return;
-      }
-      signal.addEventListener('abort', () => {
-        reject(new AgentError('Operation was aborted'));
-      }, { once: true });
+  private createSignalPromise(signal?: AbortSignal): { promise: Promise<never>; clear: () => void } {
+    if (!signal) {
+      return { promise: new Promise<never>(() => {}), clear: () => {} };
+    }
+    if (signal.aborted) {
+      return { promise: Promise.reject(new AgentError('Operation was aborted')), clear: () => {} };
+    }
+    let handler: (() => void) | undefined;
+    const promise = new Promise<never>((_, reject) => {
+      handler = () => reject(new AgentError('Operation was aborted'));
+      signal.addEventListener('abort', handler, { once: true });
     });
+    return {
+      promise,
+      clear: () => {
+        if (handler) signal.removeEventListener('abort', handler);
+      },
+    };
   }
 
   /**

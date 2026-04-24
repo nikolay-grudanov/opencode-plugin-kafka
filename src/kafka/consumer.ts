@@ -240,7 +240,7 @@ export async function executeWithThrottleRetry<T>(
  * @param state - Состояние consumer (Constitution Principle IV: No-State Consumer)
  * @param agent - OpenCode agent для обработки сообщений
  * @param responseProducer - Producer для отправки ответов агентам
- * @param activeSessions - Set для отслеживания активных сессий (C2: Set<AbortController> вместо Set<string>)
+ * @param activeSessions - Set для отслеживания активных сессий (Set<AbortController>)
  * @returns Promise<void>
  *
  * @example
@@ -424,28 +424,9 @@ export async function eachMessageHandler(
         timeoutMs: matchedRule.timeoutMs ?? 120_000,
         signal: abortController.signal,
       });
-    } catch (invokeError) {
-      // Should never happen (invoke never throws per contract), but handle defensively
-      activeSessions.delete(abortController);
-      const error = invokeError instanceof Error ? invokeError : new Error(String(invokeError));
-      await sendToDlq(dlqProducer, {
-        value: messageValue.toString('utf-8'),
-        topic: payload.topic,
-        partition: payload.partition,
-        offset: payload.message.offset,
-        originalKey: payload.message.key?.toString() ?? null,
-      }, error);
-      state.dlqMessagesCount++;
-      logDlqRate(state);
-      await executeWithThrottleRetry(
-        () => commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]),
-        'commitOffsets',
-      );
-      return;
+    } finally {
+      activeSessions.delete(abortController); // гарантированная очистка во всех путях
     }
-
-    // Удаляем abortController из activeSessions после завершения
-    activeSessions.delete(abortController);
 
     // 8. Обрабатываем результат агента — отправляем response или DLQ
     const sessionId = agentResult.sessionId;
@@ -569,6 +550,7 @@ export async function performGracefulShutdown(
   signal: string,
   state: ConsumerState,
   exitFn: (code: number) => never = process.exit as (code: number) => never,
+  // зарезервировано для будущего использования; отмена через AbortController
   _agent?: IOpenCodeAgent,
   activeSessions?: Set<AbortController>,
 ): Promise<void> {
