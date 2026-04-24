@@ -150,7 +150,11 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
   /**
    * Создаёт Promise который отклоняется через указанное время.
    * Используется для Promise.race с prompt.
-   * Возвращает объект с promise и функцией очистки таймера.
+   *
+   * @param timeoutMs - Таймаут в миллисекундах
+   * @returns Объект с:
+   *   - `promise` — Promise который reject TimeoutError через timeoutMs
+   *   - `clear` — Функция очистки таймера (вызывать в finally)
    */
   private createTimeoutPromise(timeoutMs: number): { promise: Promise<never>; clear: () => void } {
     let timer: ReturnType<typeof setTimeout>;
@@ -171,7 +175,11 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
   /**
    * Создаёт Promise который отклоняется при abort signal (C2).
    * Используется для Promise.race с prompt.
-   * Возвращает объект с promise и функцией очистки слушателя.
+   *
+   * @param signal - AbortSignal для отмены операции (опционально)
+   * @returns Объект с:
+   *   - `promise` — Promise который reject AgentError при abort
+   *   - `clear` — Функция удаления слушателя (вызывать в finally)
    */
   private createSignalPromise(signal?: AbortSignal): { promise: Promise<never>; clear: () => void } {
     if (!signal) {
