@@ -19,7 +19,7 @@
 
 **Purpose**: Проверка prerequisites перед реализацией
 
-- [ ] T001 Verify `test:integration` script exists in `package.json` — confirm `"test:integration": "vitest run --config vitest.integration.config.ts"` is present. If missing, add it.
+- [x] T001 Verify `test:integration` script exists in `package.json` — confirm `"test:integration": "vitest run --config vitest.integration.config.ts"` is present. If missing, add it.
 
 ---
 
@@ -33,8 +33,8 @@
 
 ### Implementation for User Story 1 (+ US2, US3)
 
-- [ ] T002 [US1][US2][US3] Add `integration` job to `.github/workflows/ci.yml` after the existing `ci` job with: `runs-on: ubuntu-latest`, `timeout-minutes: 15`, no `needs` dependency (parallel), steps: checkout@`11bd71901bbe5b1630ceea73d27597364c9af683` (v4.2.2) → setup-node@`49933ea5288caeca8642d1e84afbd3f7d6820020` (v4.4.0) with `node-version: 20` and `cache: 'npm'` → `npm ci` → `npm run test:integration`
-- [ ] T003 [US1] Replace obsolete TODO comment (3 lines about container runtime and self-hosted runner) above the `Test` step in the `ci` job in `.github/workflows/ci.yml` with: `# Unit tests only — integration tests run in the separate 'integration' job`
+- [x] T002 [US1][US2][US3] Add `integration` job to `.github/workflows/ci.yml` after the existing `ci` job with: `runs-on: ubuntu-latest`, `timeout-minutes: 15`, no `needs` dependency (parallel), steps: checkout@`11bd71901bbe5b1630ceea73d27597364c9af683` (v4.2.2) → setup-node@`49933ea5288caeca8642d1e84afbd3f7d6820020` (v4.4.0) with `node-version: 20` and `cache: 'npm'` → `npm ci` → `npm run test:integration`
+- [x] T003 [US1] Replace obsolete TODO comment (3 lines about container runtime and self-hosted runner) above the `Test` step in the `ci` job in `.github/workflows/ci.yml` with: `# Unit tests only — integration tests run in the separate 'integration' job`
 
 **Checkpoint**: В `ci.yml` два job: `ci` (unit + lint + build) и `integration` (Redpanda testcontainers). Оба запускаются параллельно. Integration job имеет `timeout-minutes: 15`. Pinned SHA совпадают.
 
@@ -44,8 +44,8 @@
 
 **Purpose**: Проверка корректности реализации и прогон project checks
 
-- [ ] T004 Validate `.github/workflows/ci.yml` structure: 2 jobs (`ci` + `integration`), same pinned SHA, no `needs` in integration job, `timeout-minutes: 15` present, triggers unchanged, obsolete comment removed
-- [ ] T005 Run project validation: `npm run lint`, `npm run typecheck`, `npm run build` — all pass without errors
+- [x] T004 Validate `.github/workflows/ci.yml` structure: 2 jobs (`ci` + `integration`), same pinned SHA, no `needs` in integration job, `timeout-minutes: 15` present, triggers unchanged, obsolete comment removed
+- [x] T005 Run project validation: `npm run lint`, `npm run typecheck`, `npm run build` — all pass without errors
 
 ---
 
