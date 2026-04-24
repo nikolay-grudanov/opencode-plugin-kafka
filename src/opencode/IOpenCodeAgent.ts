@@ -52,6 +52,8 @@ export interface AgentResult {
 export interface InvokeOptions {
   /** Таймаут выполнения в миллисекундах */
   timeoutMs: number;
+  /** Signal для отмены запроса (C2: заменяет фейковый UUID на AbortController) */
+  signal?: AbortSignal;
 }
 
 // ============================================================================

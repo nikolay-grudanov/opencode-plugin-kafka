@@ -161,7 +161,7 @@
 ### Отрицательные
 
 1. **Lower throughput**: Синхронный blocking вызов ограничивает пропускную способность
-   - *Mitigation*: Это ожидаемый tradeoff для reliability. Если нужен higher throughput,可以考虑 отдельный плагин с async обработкой.
+   - *Mitigation*: Это ожидаемый tradeoff для reliability. Если нужен higher throughput, можно рассмотреть отдельный плагин с async обработкой.
 
 2. **Potential duplicates**: At-least-once processing может создавать дубликаты
    - *Mitigation*: Агенты должны быть idempotent (задача конфигурации агента, а не плагина)

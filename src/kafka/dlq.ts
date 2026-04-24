@@ -58,6 +58,9 @@ export interface DlqEnvelope {
 
   /** ISO 8601 timestamp момента отказа */
   failedAt: string;
+
+  /** Ключ оригинального сообщения (может быть null) */
+  originalKey?: string | null;
 }
 
 /**
@@ -84,7 +87,7 @@ export interface DlqEnvelope {
  */
 export async function sendToDlq(
   producer: Producer,
-  originalMessage: { value: string | null; topic: string; partition: number; offset: string | number },
+  originalMessage: { value: string | null; topic: string; partition: number; offset: string | number; originalKey?: string | null },
   error: Error,
 ): Promise<void> {
   try {
@@ -101,6 +104,7 @@ export async function sendToDlq(
       offset: String(originalMessage.offset),
       errorMessage: sanitizedErrorMessage,
       failedAt: new Date().toISOString(),
+      originalKey: originalMessage.originalKey ?? null,
     };
 
     // Формируем Kafka record

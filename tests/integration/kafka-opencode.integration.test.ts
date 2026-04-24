@@ -227,7 +227,7 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
 
       const config = createTestConfig([TEST_TOPIC], [rule]);
       const state = createTestState();
-      const activeSessions = new Set<string>();
+      const activeSessions = new Set<AbortController>();
       const mockCommit = async () => {};
 
       const testMessage = { type: 'test-type', data: 'test-data' };
@@ -361,7 +361,7 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
 
       const config = createTestConfig([TEST_TOPIC], [rule]);
       const state = createTestState();
-      const activeSessions = new Set<string>();
+      const activeSessions = new Set<AbortController>();
       const mockCommit = async () => {};
 
       const testMessage = { type: 'timeout-test', data: 'test-data' };
@@ -491,7 +491,7 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
 
       const config = createTestConfig([TEST_TOPIC], [rule]);
       const state = createTestState();
-      const activeSessions = new Set<string>();
+      const activeSessions = new Set<AbortController>();
       const mockCommit = async () => {};
 
       const testMessage = { type: 'error-test', data: 'test-data' };
@@ -603,7 +603,7 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
 
       const config = createTestConfig([TEST_TOPIC], [rule]);
       const state = createTestState();
-      const activeSessions = new Set<string>();
+      const activeSessions = new Set<AbortController>();
       const mockCommit = async () => {};
 
       // Payload с null value (tombstone)
@@ -696,7 +696,7 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
 
       const config = createTestConfig([TEST_TOPIC], [rule]);
       const state = createTestState();
-      const activeSessions = new Set<string>();
+      const activeSessions = new Set<AbortController>();
       const mockCommit = async () => {};
 
       // Сообщение которое не matchирует ни одно правило
@@ -789,7 +789,7 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
 
       const config = createTestConfig([TEST_TOPIC], [rule]);
       const state = createTestState();
-      const activeSessions = new Set<string>();
+      const activeSessions = new Set<AbortController>();
       const mockCommit = async () => {};
 
       const testMessage = { type: 'no-topic-test', data: 'test-data' };

@@ -7,7 +7,6 @@
  *
  * @see https://kafka.js.org/docs/consuming#a-name-getting-the-message-a-message
  */
-import { randomUUID } from 'crypto';
 import type { PluginConfigV003 } from '../schemas/index.js';
 import type { Producer, Consumer, EachMessagePayload } from 'kafkajs';
 import { matchRuleV003 } from '../core/routing.js';
@@ -241,7 +240,7 @@ export async function executeWithThrottleRetry<T>(
  * @param state - Состояние consumer (Constitution Principle IV: No-State Consumer)
  * @param agent - OpenCode agent для обработки сообщений
  * @param responseProducer - Producer для отправки ответов агентам
- * @param activeSessions - Set для отслеживания активных сессий
+ * @param activeSessions - Set для отслеживания активных сессий (C2: Set<AbortController> вместо Set<string>)
  * @returns Promise<void>
  *
  * @example
@@ -266,7 +265,7 @@ export async function eachMessageHandler(
   state: ConsumerState,
   agent: IOpenCodeAgent,
   responseProducer: Producer,
-  activeSessions: Set<string>,
+  activeSessions: Set<AbortController>,
 ): Promise<void> {
   // Проверяем состояние shutdown — если shutdown в процессе, не обрабатываем новые сообщения
   if (state.isShuttingDown) {
@@ -316,6 +315,7 @@ export async function eachMessageHandler(
         topic: payload.topic,
         partition: payload.partition,
         offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
       }, error);
       state.dlqMessagesCount++;
       logDlqRate(state);
@@ -332,6 +332,7 @@ export async function eachMessageHandler(
         topic: payload.topic,
         partition: payload.partition,
         offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
       }, error);
       state.dlqMessagesCount++;
       logDlqRate(state);
@@ -350,6 +351,7 @@ export async function eachMessageHandler(
         topic: payload.topic,
         partition: payload.partition,
         offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
       }, error);
       state.dlqMessagesCount++;
       logDlqRate(state);
@@ -368,6 +370,7 @@ export async function eachMessageHandler(
         topic: payload.topic,
         partition: payload.partition,
         offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
       }, error);
       state.dlqMessagesCount++;
       logDlqRate(state);
@@ -411,24 +414,26 @@ export async function eachMessageHandler(
       }),
     );
 
-    // 7. Вызываем OpenCode агента
-    const sessionId = randomUUID();
-    activeSessions.add(sessionId);
+    // 7. Вызываем OpenCode агента (C2: AbortController для реальной отмены)
+    const abortController = new AbortController();
+    activeSessions.add(abortController);
 
     let agentResult: AgentResult;
     try {
       agentResult = await agent.invoke(prompt, matchedRule.agentId, {
         timeoutMs: matchedRule.timeoutMs ?? 120_000,
+        signal: abortController.signal,
       });
     } catch (invokeError) {
       // Should never happen (invoke never throws per contract), but handle defensively
-      activeSessions.delete(sessionId);
+      activeSessions.delete(abortController);
       const error = invokeError instanceof Error ? invokeError : new Error(String(invokeError));
       await sendToDlq(dlqProducer, {
         value: messageValue.toString('utf-8'),
         topic: payload.topic,
         partition: payload.partition,
         offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
       }, error);
       state.dlqMessagesCount++;
       logDlqRate(state);
@@ -439,10 +444,12 @@ export async function eachMessageHandler(
       return;
     }
 
-    // Удаляем sessionId из activeSessions после успешного вызова
-    activeSessions.delete(sessionId);
+    // Удаляем abortController из activeSessions после завершения
+    activeSessions.delete(abortController);
 
     // 8. Обрабатываем результат агента — отправляем response или DLQ
+    const sessionId = agentResult.sessionId;
+
     if (agentResult.status === 'success') {
       // Отправляем response если правило имеет responseTopic
       if (matchedRule.responseTopic) {
@@ -479,6 +486,7 @@ export async function eachMessageHandler(
         topic: payload.topic,
         partition: payload.partition,
         offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
       }, error);
       state.dlqMessagesCount++;
 
@@ -512,6 +520,7 @@ export async function eachMessageHandler(
       topic: payload.topic,
       partition: payload.partition,
       offset: payload.message.offset,
+      originalKey: payload.message.key?.toString() ?? null,
     }, dlqError);
 
     state.dlqMessagesCount++;
@@ -545,7 +554,7 @@ export async function eachMessageHandler(
  * @param state - Состояние consumer (Constitution Principle IV: No-State Consumer)
  * @param exitFn - Функция для выхода из процесса (по умолчанию process.exit)
  * @param agent - OpenCode agent для abort активных сессий (опционально)
- * @param activeSessions - Set активных сессий для abort (опционально)
+ * @param activeSessions - Set активных сессий для abort (C2: Set<AbortController>, опционально)
  * @returns Promise<void>
  *
  * @example
@@ -560,8 +569,8 @@ export async function performGracefulShutdown(
   signal: string,
   state: ConsumerState,
   exitFn: (code: number) => never = process.exit as (code: number) => never,
-  agent?: IOpenCodeAgent,
-  activeSessions?: Set<string>,
+  _agent?: IOpenCodeAgent,
+  activeSessions?: Set<AbortController>,
 ): Promise<void> {
   // Защита от повторных вызовов
   if (state.isShuttingDown) {
@@ -592,8 +601,8 @@ export async function performGracefulShutdown(
   try {
     // Создаем Promise для graceful shutdown с timeout
     const shutdownPromise = (async () => {
-      // 0. Abort all active sessions via agent.abort() (FR-016)
-      if (agent && activeSessions && activeSessions.size > 0) {
+      // 0. Abort all active sessions via AbortController.abort() (C2: заменяет agent.abort())
+      if (activeSessions && activeSessions.size > 0) {
         console.log(
           JSON.stringify({
             level: 'info',
@@ -603,37 +612,30 @@ export async function performGracefulShutdown(
           }),
         );
 
-        // Используем Promise.allSettled() для параллельного abort всех сессий
-        // Это гарантирует что все abort попытки будут выполнены даже если некоторые падают
-        const abortPromises = Array.from(activeSessions).map(async (sessionId) => {
+        // C2: Вызываем abort() на каждом AbortController
+        let abortedCount = 0;
+        for (const controller of activeSessions) {
           try {
-            await agent.abort(sessionId);
-            return { sessionId, success: true };
+            controller.abort();
+            abortedCount++;
           } catch (abortError) {
             console.warn(
               JSON.stringify({
                 level: 'warn',
                 event: 'session_abort_failed',
-                sessionId,
                 error: abortError instanceof Error ? abortError.message : String(abortError),
                 timestamp: new Date().toISOString(),
               }),
             );
-            return { sessionId, success: false };
           }
-        });
-
-        const abortResults = await Promise.allSettled(abortPromises);
-        const successfulAborts = abortResults.filter(
-          (r) => r.status === 'fulfilled' && r.value.success,
-        ).length;
+        }
 
         console.log(
           JSON.stringify({
             level: 'info',
             event: 'sessions_aborted',
             totalSessions: activeSessions.size,
-            successfulAborts,
+            abortedCount,
             timestamp: new Date().toISOString(),
           }),
         );
@@ -829,7 +831,7 @@ export async function startConsumer(
   const dlqProducer = createDlqProducer(kafka);
 
   // 3a. Создаем response producer для отправки ответов агентов (FR-022)
-  const responseProducer = await createResponseProducer(kafka);
+  const responseProducer = createResponseProducer(kafka);
 
   // 4. Создаем состояние consumer (Constitution Principle IV: No-State Consumer)
   const state: ConsumerState = {
@@ -839,8 +841,8 @@ export async function startConsumer(
     lastDlqRateLogTime: Date.now(),
   };
 
-  // 4a. Создаем Set для отслеживания активных сессий агентов
-  const activeSessions = new Set<string>();
+  // 4a. Создаем Set для отслеживания активных сессий агентов (C2: AbortController)
+  const activeSessions = new Set<AbortController>();
 
   try {
     // 5. Подключаем consumer и producer

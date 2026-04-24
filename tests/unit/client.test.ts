@@ -275,10 +275,12 @@ describe('createResponseProducer', () => {
       // Перехватываем вызов producer() чтобы вернуть мок
       kafka.producer = vi.fn().mockReturnValue(mockProducer);
       
-      const producer = await createResponseProducer(kafka);
+      const producer = createResponseProducer(kafka);
 
       expect(producer).toBeDefined();
       expect(kafka.producer).toHaveBeenCalled();
+      // createResponseProducer НЕ должен вызывать connect — это делает startConsumer
+      expect(mockProducer.connect).not.toHaveBeenCalled();
     });
   });
 });

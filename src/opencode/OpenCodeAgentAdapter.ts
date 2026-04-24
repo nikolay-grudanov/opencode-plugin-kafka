@@ -10,22 +10,9 @@
  */
 
 import type { IOpenCodeAgent, AgentResult, InvokeOptions } from './IOpenCodeAgent.js';
-import type { SDKClient, MessagePart } from '../types/opencode-sdk.js';
-import { TimeoutError } from './AgentError.js';
-
-/**
- * Извлекает текстовый контент из ответа ассистента.
- * Фильтрует только text parts и объединяет их через двойной перевод строки.
- *
- * @param parts - массив частей сообщения
- * @returns объединённый текст
- */
-export function extractResponseText(parts: MessagePart[]): string {
-  return parts
-    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-    .map((part) => part.text ?? '')
-    .join('\n\n');
-}
+import type { SDKClient } from '../types/opencode-sdk.js';
+import { TimeoutError, AgentError } from './AgentError.js';
+import { extractResponseText } from './utils.js';
 
 /**
  * Адаптер для вызова OpenCode агентов через SDK.
@@ -56,13 +43,20 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
 
     try {
       // 1. Создаём новую сессию
-      const session = await this.client.session.create({ body: {} });
+      const session = await this.client.session.create({ body: { title: `kafka-plugin-${agentId}` } });
       sessionId = session.id;
 
       // 2. Устанавливаем timeout (по умолчанию 120 сек)
       const timeoutMs = options.timeoutMs ?? 120000;
 
-      // 3. Promptsешение с race против timeout
+      // 3. Проверяем signal на early abort (C2)
+      if (options.signal?.aborted) {
+        throw new AgentError('Operation was aborted');
+      }
+
+      // 4. Создаём промисы для race: timeout и abort signal
+      const { promise: timeoutPromise, clear: clearTimeout } = this.createTimeoutPromise(timeoutMs);
+      const signalPromise = this.createSignalPromise(options.signal);
       const response = await Promise.race([
         this.client.session.prompt({
           path: { id: sessionId },
@@ -71,13 +65,16 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
             agent: agentId,
           },
         }),
-        this.createTimeoutPromise(timeoutMs, agentId),
+        timeoutPromise,
+        signalPromise,
       ]);
+      clearTimeout();
 
-      // 4. Извлекаем текст из ответа
-      const responseText = extractResponseText(response.parts);
+      // 5. Извлекаем текст из ответа
+      const parts = response?.parts ?? [];
+      const responseText = extractResponseText(parts);
 
-      // 5. Успешный результат
+      // 6. Успешный результат
       return {
         status: 'success',
         response: responseText,
@@ -96,6 +93,17 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
       if (err instanceof TimeoutError) {
         return {
           status: 'timeout',
+          sessionId,
+          errorMessage: err.message,
+          executionTimeMs: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // C2: AbortSignal отмена
+      if (err instanceof AgentError && err.message === 'Operation was aborted') {
+        return {
+          status: 'error',
           sessionId,
           errorMessage: err.message,
           executionTimeMs: Date.now() - startTime,
@@ -137,14 +145,42 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
   /**
    * Создаёт Promise который отклоняется через указанное время.
    * Используется для Promise.race с prompt.
+   * Возвращает объект с promise и функцией очистки таймера.
    */
-  private createTimeoutPromise(timeoutMs: number, agentId: string): Promise<never> {
-    return new Promise((_, reject) =>
-      setTimeout(
-        () => reject(new TimeoutError(`Agent ${agentId} timed out after ${timeoutMs}ms`)),
+  private createTimeoutPromise(timeoutMs: number): { promise: Promise<never>; clear: () => void } {
+    let timer: ReturnType<typeof setTimeout>;
+    const promise = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new TimeoutError(`Agent timed out after ${timeoutMs}ms`)),
         timeoutMs
-      )
-    );
+      );
+    });
+    return {
+      promise,
+      clear: () => {
+        if (timer) clearTimeout(timer);
+      },
+    };
+  }
+
+  /**
+   * Создаёт Promise который отклоняется при abort signal (C2).
+   * Используется для Promise.race с prompt.
+   */
+  private createSignalPromise(signal?: AbortSignal): Promise<never> {
+    return new Promise<never>((_, reject) => {
+      if (!signal) {
+        // Без signal — никогда не отклоняем
+        return;
+      }
+      if (signal.aborted) {
+        reject(new AgentError('Operation was aborted'));
+        return;
+      }
+      signal.addEventListener('abort', () => {
+        reject(new AgentError('Operation was aborted'));
+      }, { once: true });
+    });
   }
 
   /**

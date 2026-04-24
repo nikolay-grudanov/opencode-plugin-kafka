@@ -140,8 +140,7 @@ export function createDlqProducer(kafka: Kafka): Producer {
  * const responseProducer = await createResponseProducer(kafka);
  * ```
  */
-export async function createResponseProducer(kafka: Kafka): Promise<Producer> {
+export function createResponseProducer(kafka: Kafka): Producer {
   const producer = kafka.producer({ allowAutoTopicCreation: false });
-  await producer.connect();
   return producer;
 }

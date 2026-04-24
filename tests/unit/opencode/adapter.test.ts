@@ -98,7 +98,9 @@ describe('OpenCodeAgentAdapter', () => {
     // Динамический импорт модуля после моков
     const module = await import('../../../src/opencode/OpenCodeAgentAdapter.js');
     OpenCodeAgentAdapter = module.OpenCodeAgentAdapter;
-    extractResponseText = module.extractResponseText;
+
+    const utilsModule = await import('../../../src/opencode/utils.js');
+    extractResponseText = utilsModule.extractResponseText;
   });
 
   it('должен возвращать результат success при успешном вызове SDK', async () => {
@@ -282,7 +284,7 @@ describe('OpenCodeAgentAdapter', () => {
 
 describe('extractResponseText standalone', () => {
   it('экспортируется и работает как standalone функция', async () => {
-    const { extractResponseText } = await import('../../../src/opencode/OpenCodeAgentAdapter.js');
+    const { extractResponseText } = await import('../../../src/opencode/utils.js');
 
     const parts: Array<{ type: string; text?: string }> = [
       { type: 'text', text: 'Line 1' },

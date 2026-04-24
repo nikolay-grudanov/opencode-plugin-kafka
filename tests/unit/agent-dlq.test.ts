@@ -28,7 +28,7 @@ describe('Agent Error/Timeout → DLQ', () => {
   let mockState: MockConsumerState;
   let mockAgent: IOpenCodeAgent;
   let mockResponseProducer: Producer;
-  let activeSessions: Set<string>;
+  let activeSessions: Set<AbortController>;
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -72,7 +72,7 @@ describe('Agent Error/Timeout → DLQ', () => {
       disconnect: vi.fn().mockResolvedValue(undefined),
     } as unknown as Producer;
 
-    activeSessions = new Set<string>();
+    activeSessions = new Set<AbortController>();
 
     vi.clearAllMocks();
   });

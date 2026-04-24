@@ -13,7 +13,7 @@ describe('MockOpenCodeAgent', () => {
         { agentId: 'test-agent', response: 'test response' },
       ]);
 
-      const result = await agent.invoke('test prompt', 'test-agent');
+      const result = await agent.invoke('test prompt', 'test-agent', { timeoutMs: 30000 });
 
       expect(result.status).toBe('success');
       expect(result.response).toBe('test response');
@@ -41,7 +41,7 @@ describe('MockOpenCodeAgent', () => {
         { agentId: 'known-agent', response: 'response' },
       ]);
 
-      const result = await agent.invoke('test prompt', 'unknown-agent');
+      const result = await agent.invoke('test prompt', 'unknown-agent', { timeoutMs: 30000 });
 
       expect(result.status).toBe('error');
       expect(result.errorMessage).toContain('unknown-agent');
@@ -52,7 +52,7 @@ describe('MockOpenCodeAgent', () => {
         { agentId: 'error-agent', shouldError: true, errorMessage: 'Custom error' },
       ]);
 
-      const result = await agent.invoke('test prompt', 'error-agent');
+      const result = await agent.invoke('test prompt', 'error-agent', { timeoutMs: 30000 });
 
       expect(result.status).toBe('error');
       expect(result.errorMessage).toBe('Custom error');
@@ -63,7 +63,7 @@ describe('MockOpenCodeAgent', () => {
         { agentId: 'test-agent', response: 'test', delayMs: 50 },
       ]);
 
-      const invokePromise = agent.invoke('prompt', 'test-agent');
+      const invokePromise = agent.invoke('prompt', 'test-agent', { timeoutMs: 30000 });
 
       // Сессия должна быть активной во время выполнения
       expect(agent.getActiveSessionCount()).toBeGreaterThanOrEqual(0);
@@ -81,7 +81,7 @@ describe('MockOpenCodeAgent', () => {
       ]);
 
       // Запускаем invoke, получаем result с sessionId
-      const result = await agent.invoke('prompt', 'long-agent');
+      const result = await agent.invoke('prompt', 'long-agent', { timeoutMs: 30000 });
 
       // abort для завершённой сессии возвращает false (сессия уже удалена)
       const abortResult = await agent.abort(result.sessionId);
@@ -98,7 +98,7 @@ describe('MockOpenCodeAgent', () => {
       ]);
 
       // Запускаем long-running invoke
-      const invokePromise = agent.invoke('prompt', 'test-agent');
+      const invokePromise = agent.invoke('prompt', 'test-agent', { timeoutMs: 30000 });
 
       // Ждём немного чтобы сессия появилась
       await new Promise(r => setTimeout(r, 10));
@@ -143,8 +143,8 @@ describe('MockOpenCodeAgent', () => {
       ]);
 
       // Запускаем несколько параллельных invokes
-      const p1 = agent.invoke('prompt 1', 'test-agent');
-      const p2 = agent.invoke('prompt 2', 'test-agent');
+      const p1 = agent.invoke('prompt 1', 'test-agent', { timeoutMs: 30000 });
+      const p2 = agent.invoke('prompt 2', 'test-agent', { timeoutMs: 30000 });
 
       await Promise.resolve(); // Даём запуститься
 
@@ -159,7 +159,7 @@ describe('MockOpenCodeAgent', () => {
         { agentId: 'test-agent', response: 'test' },
       ]);
 
-      await agent.invoke('prompt', 'test-agent');
+      await agent.invoke('prompt', 'test-agent', { timeoutMs: 30000 });
 
       expect(agent.getActiveSessionCount()).toBe(0);
     });

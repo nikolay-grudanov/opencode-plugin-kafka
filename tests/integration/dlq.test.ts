@@ -569,7 +569,7 @@ describe('Integration Tests: DLQ Flow', () => {
   describe('Agent Error → DLQ', () => {
     let mockAgent: IOpenCodeAgent;
     let mockResponseProducer: Producer;
-    let activeSessions: Set<string>;
+    let activeSessions: Set<AbortController>;
 
     beforeEach(() => {
       // Mock agent с ошибкой
@@ -591,7 +591,7 @@ describe('Integration Tests: DLQ Flow', () => {
         disconnect: vi.fn().mockResolvedValue(undefined),
       } as unknown as Producer;
 
-      activeSessions = new Set<string>();
+      activeSessions = new Set<AbortController>();
     });
 
     it('отправляет сообщение в DLQ когда агент возвращает status=error', async () => {
@@ -638,7 +638,7 @@ describe('Integration Tests: DLQ Flow', () => {
   describe('Agent Timeout → DLQ', () => {
     let mockAgent: IOpenCodeAgent;
     let mockResponseProducer: Producer;
-    let activeSessions: Set<string>;
+    let activeSessions: Set<AbortController>;
 
     beforeEach(() => {
       // Mock agent с timeout
@@ -660,7 +660,7 @@ describe('Integration Tests: DLQ Flow', () => {
         disconnect: vi.fn().mockResolvedValue(undefined),
       } as unknown as Producer;
 
-      activeSessions = new Set<string>();
+      activeSessions = new Set<AbortController>();
     });
 
     it('отправляет сообщение в DLQ когда агент возвращает status=timeout', async () => {

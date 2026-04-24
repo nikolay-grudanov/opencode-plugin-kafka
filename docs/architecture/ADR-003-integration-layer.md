@@ -376,7 +376,7 @@ export class MockOpenCodeAgent implements IOpenCodeAgent {
 1. **Fail-fast**: Синтаксическая проверка при старте (non-empty string)
 2. **No runtime check**: Не проверяем существование агента при старте
 3. **DLQ for missing**: Если агент не найден — ошибка через DLQ
-4. **Simplicity**: Проверка существования требует额外 API call
+4. **Simplicity**: Проверка существования требует дополнительный API call
 
 ### Почему best-effort abort при timeout?
 1. **Cleanup**: Пытаемся освободить ресурсы сервера

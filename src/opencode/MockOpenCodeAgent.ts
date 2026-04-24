@@ -53,24 +53,35 @@ export class MockOpenCodeAgent implements IOpenCodeAgent {
     this.configMap = new Map(configs.map(c => [c.agentId, c]));
   }
 
-  /**
-   * Вызвать мок агента.
-   *
-   * @param prompt - текст промпта (игнорируется в моке)
-   * @param agentId - ID агента для поиска конфигурации
-   * @param options - опции вызова (timeoutMs опционально)
-   * @returns результат согласно конфигурации или ошибка
-   */
+/**
+    * Вызвать мок агента.
+    *
+    * @param prompt - текст промпта (игнорируется в моке)
+    * @param agentId - ID агента для поиска конфигурации
+    * @param options - опции вызова (timeoutMs)
+    * @returns результат согласно конфигурации или ошибка
+    */
   async invoke(
     _prompt: string,
     agentId: string,
-    options?: InvokeOptions
+    options: InvokeOptions
   ): Promise<AgentResult> {
     const startTime = Date.now();
     const sessionId = randomUUID();
     this.activeSessions.add(sessionId);
 
     try {
+      // C2: Проверяем signal на early abort
+      if (options.signal?.aborted) {
+        return {
+          status: 'error',
+          sessionId,
+          errorMessage: 'Operation was aborted',
+          executionTimeMs: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
       const config = this.configMap.get(agentId);
 
       // Нет конфигурации для agentId
@@ -97,7 +108,7 @@ export class MockOpenCodeAgent implements IOpenCodeAgent {
 
       // Проверяем таймаут
       const delayMs = config.delayMs ?? 0;
-      const timeoutMs = options?.timeoutMs ?? 30000;
+      const timeoutMs = options.timeoutMs;
 
       if (delayMs > timeoutMs) {
         return {
@@ -111,7 +122,28 @@ export class MockOpenCodeAgent implements IOpenCodeAgent {
 
       // Задержка если нужна
       if (delayMs > 0) {
-        await new Promise(resolve => setTimeout(resolve, delayMs));
+        // C2: Проверяем abort во время delay
+        const delayPromise = new Promise<void>(resolve => {
+          const timer = setTimeout(resolve, delayMs);
+          if (options.signal) {
+            options.signal.addEventListener('abort', () => {
+              clearTimeout(timer);
+              resolve();
+            }, { once: true });
+          }
+        });
+        await delayPromise;
+
+        // Если abort случился во время delay — возвращаем ошибку
+        if (options.signal?.aborted) {
+          return {
+            status: 'error',
+            sessionId,
+            errorMessage: 'Operation was aborted',
+            executionTimeMs: Date.now() - startTime,
+            timestamp: new Date().toISOString(),
+          };
+        }
       }
 
       // Успешный ответ

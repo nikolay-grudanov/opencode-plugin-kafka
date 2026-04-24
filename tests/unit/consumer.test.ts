@@ -36,7 +36,7 @@ describe('eachMessageHandler', () => {
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let mockAgent: IOpenCodeAgent;
   let mockResponseProducer: Producer;
-  let activeSessions: Set<string>;
+  let activeSessions: Set<AbortController>;
 
   beforeEach(() => {
     // Setup mocks
@@ -70,7 +70,7 @@ describe('eachMessageHandler', () => {
     } as unknown as Producer;
 
     // Active sessions set
-    activeSessions = new Set<string>();
+    activeSessions = new Set<AbortController>();
 
     // Setup config with one matching rule
     rules = [
@@ -822,7 +822,7 @@ describe('eachMessageHandler shutdown state', () => {
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let mockAgent: IOpenCodeAgent;
   let mockResponseProducer: Producer;
-  let activeSessions: Set<string>;
+  let activeSessions: Set<AbortController>;
 
   beforeEach(() => {
     mockDlqProducer = {} as Producer;
@@ -854,7 +854,7 @@ describe('eachMessageHandler shutdown state', () => {
       disconnect: vi.fn().mockResolvedValue(undefined),
     } as unknown as Producer;
 
-    activeSessions = new Set<string>();
+    activeSessions = new Set<AbortController>();
 
     const rules = [
       {
@@ -942,7 +942,7 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
   let originalEnv: NodeJS.ProcessEnv;
   let mockAgent: IOpenCodeAgent;
   let mockResponseProducer: Producer;
-  let activeSessions: Set<string>;
+  let activeSessions: Set<AbortController>;
 
   beforeEach(() => {
     originalEnv = process.env;
@@ -975,7 +975,7 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
       disconnect: vi.fn().mockResolvedValue(undefined),
     } as unknown as Producer;
 
-    activeSessions = new Set<string>();
+    activeSessions = new Set<AbortController>();
 
     const rules = [
       {
@@ -1427,7 +1427,7 @@ describe('startConsumer', () => {
     });
     vi.mocked(clientModule.createConsumer).mockReturnValue(mockConsumer);
     vi.mocked(clientModule.createDlqProducer).mockReturnValue(mockDlqProducer);
-    vi.mocked(clientModule.createResponseProducer).mockResolvedValue(mockResponseProducer);
+    vi.mocked(clientModule.createResponseProducer).mockReturnValue(mockResponseProducer);
 
     const consumerModule = await import('../../src/kafka/consumer.js');
     startConsumer = consumerModule.startConsumer;
@@ -1640,7 +1640,7 @@ describe('agent invoke integration', () => {
   let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
   let mockAgent: IOpenCodeAgent;
   let mockResponseProducer: Producer;
-  let activeSessions: Set<string>;
+  let activeSessions: Set<AbortController>;
   let sendToDlqSpy: ReturnType<typeof vi.fn>;
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
@@ -1685,7 +1685,7 @@ describe('agent invoke integration', () => {
       disconnect: vi.fn().mockResolvedValue(undefined),
     } as unknown as Producer;
 
-    activeSessions = new Set<string>();
+    activeSessions = new Set<AbortController>();
 
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -1891,7 +1891,7 @@ describe('graceful shutdown (FR-016)', () => {
   let mockResponseProducer: { disconnect: ReturnType<typeof vi.fn> };
   let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
   let mockAgent: IOpenCodeAgent;
-  let activeSessions: Set<string>;
+  let activeSessions: Set<AbortController>;
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
@@ -1926,8 +1926,8 @@ describe('graceful shutdown (FR-016)', () => {
       abort: vi.fn().mockResolvedValue(true),
     };
 
-    // Active sessions с несколькими session IDs
-    activeSessions = new Set<string>(['session-1', 'session-2', 'session-3']);
+    // Active sessions с несколькими AbortController (C2)
+    activeSessions = new Set<AbortController>([new AbortController(), new AbortController(), new AbortController()]);
 
     // Мокаем consumer и producers
     mockConsumer = {
@@ -1961,15 +1961,14 @@ describe('graceful shutdown (FR-016)', () => {
       'SIGTERM',
       mockState,
       mockExit,
-      mockAgent,
-      activeSessions,
+      undefined,      // agent - позиция 7
+      activeSessions, // activeSessions - позиция 8
     );
 
-    // Проверяем что abort был вызван для каждой сессии
-    expect(mockAgent.abort).toHaveBeenCalledTimes(3);
-    expect(mockAgent.abort).toHaveBeenCalledWith('session-1');
-    expect(mockAgent.abort).toHaveBeenCalledWith('session-2');
-    expect(mockAgent.abort).toHaveBeenCalledWith('session-3');
+    // C2: Проверяем что все AbortController были aborted
+    for (const controller of activeSessions) {
+      expect(controller.signal.aborted).toBe(true);
+    }
 
     // Проверяем что все disconnect вызваны
     expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
@@ -1981,11 +1980,8 @@ describe('graceful shutdown (FR-016)', () => {
   });
 
   it('должен продолжать abort остальных сессий если один abort падает', async () => {
-    // Первый abort падает, остальные успешны
-    mockAgent.abort = vi.fn()
-      .mockRejectedValueOnce(new Error('Abort failed for session-1'))
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(true);
+    // Первый AbortController падает при abort - но AbortController.abort() не бросает ошибок
+    // Этот тест проверяет что все controllers всё равно aborted
 
     await performGracefulShutdown(
       mockConsumer,
@@ -1994,12 +1990,14 @@ describe('graceful shutdown (FR-016)', () => {
       'SIGTERM',
       mockState,
       mockExit,
-      mockAgent,
-      activeSessions,
+      undefined,      // agent - позиция 7
+      activeSessions, // activeSessions - позиция 8
     );
 
-    // Все три abort должны быть вызваны несмотря на ошибку первого
-    expect(mockAgent.abort).toHaveBeenCalledTimes(3);
+    // C2: Все AbortController должны быть aborted (AbortController.abort() не бросает)
+    for (const controller of activeSessions) {
+      expect(controller.signal.aborted).toBe(true);
+    }
 
     // Disconnect должен продолжить выполнение
     expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
@@ -2018,12 +2016,10 @@ describe('graceful shutdown (FR-016)', () => {
       'SIGTERM',
       mockState,
       mockExit,
-      mockAgent,
       activeSessions,
     );
 
-    // abort не должен быть вызван (нет сессий)
-    expect(mockAgent.abort).not.toHaveBeenCalled();
+    // C2: AbortController.abort() не бросает - просто проверяем что disconnect вызван
 
     // Все disconnect должны быть вызваны
     expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
@@ -2046,14 +2042,10 @@ describe('graceful shutdown (FR-016)', () => {
       activeSessions,
     );
 
-    // Проверяем что abort был вызван
-    expect(mockAgent.abort).toHaveBeenCalledTimes(3);
-
-    // abort вызывается до disconnect (проверяем через порядок вызовов)
-    const abortCalls = mockAgent.abort.mock.calls.length;
-    const disconnectCalls = mockConsumer.disconnect.mock.calls.length;
-    expect(abortCalls).toBeGreaterThan(0);
-    expect(disconnectCalls).toBe(1);
+    // C2: Проверяем что все AbortController были aborted
+    for (const controller of activeSessions) {
+      expect(controller.signal.aborted).toBe(true);
+    }
 
     // Все три disconnect вызваны
     expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
@@ -2167,7 +2159,7 @@ describe('DLQ error handling (FR-015)', () => {
   let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
   let mockAgent: IOpenCodeAgent;
   let mockResponseProducer: Producer;
-  let activeSessions: Set<string>;
+  let activeSessions: Set<AbortController>;
 
   const createConfigWithRules = (rules: RuleV003[]): PluginConfigV003 => ({
     topics: ['test-topic'],
@@ -2214,7 +2206,7 @@ describe('DLQ error handling (FR-015)', () => {
       disconnect: vi.fn().mockResolvedValue(undefined),
     } as unknown as Producer;
 
-    activeSessions = new Set<string>();
+    activeSessions = new Set<AbortController>();
 
     const rules = [
       {
@@ -2518,7 +2510,7 @@ it('should send to DLQ with correct args on parse error', async () => {
         lastDlqRateLogTime: Date.now(),
       };
 
-      const slowActiveSessions = new Set<string>();
+      const slowActiveSessions = new Set<AbortController>();
 
       const slowResponseProducer = {
         send: vi.fn().mockResolvedValue(undefined),
@@ -2596,7 +2588,7 @@ it('should send to DLQ with correct args on parse error', async () => {
         lastDlqRateLogTime: Date.now(),
       };
 
-      const errorActiveSessions = new Set<string>();
+      const errorActiveSessions = new Set<AbortController>();
 
       const errorResponseProducer = {
         send: vi.fn().mockResolvedValue(undefined),
