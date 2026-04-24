@@ -11,6 +11,29 @@ import type { ProducerRecord } from 'kafkajs';
 import type { Producer } from 'kafkajs';
 
 /**
+ * Санитизирует error message для безопасного хранения в DLQ.
+ *
+ * Удаляет потенциально чувствительные данные (passwords, tokens, keys).
+ * Ограничивает длину до 1000 символов для предотвращения переполнения.
+ *
+ * @param message - Оригинальное сообщение об ошибке
+ * @returns Санитизированное сообщение
+ */
+function sanitizeErrorMessage(message: string): string {
+  return message
+    // Маскируем пароли в формате password=xxx, password: xxx, "password":"xxx"
+    .replace(/password\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'password=***')
+    // Маскируем токены
+    .replace(/token\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'token=***')
+    // Маскируем API ключи
+    .replace(/api[_-]?key\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'api_key=***')
+    // Маскируем secret
+    .replace(/secret\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'secret=***')
+    // Ограничиваем длину
+    .slice(0, 1000);
+}
+
+/**
  * Тип огибающей сообщения для Dead Letter Queue.
  *
  * Содержит оригинальное сообщение плюс метаданные об ошибке.
@@ -35,6 +58,9 @@ export interface DlqEnvelope {
 
   /** ISO 8601 timestamp момента отказа */
   failedAt: string;
+
+  /** Ключ оригинального сообщения (может быть null) */
+  originalKey?: string | null;
 }
 
 /**
@@ -61,7 +87,7 @@ export interface DlqEnvelope {
  */
 export async function sendToDlq(
   producer: Producer,
-  originalMessage: { value: string | null; topic: string; partition: number; offset: string | number },
+  originalMessage: { value: string | null; topic: string; partition: number; offset: string | number; originalKey?: string | null },
   error: Error,
 ): Promise<void> {
   try {
@@ -69,13 +95,16 @@ export async function sendToDlq(
     const dlqTopic = process.env.KAFKA_DLQ_TOPIC || `${originalMessage.topic}-dlq`;
 
     // Конструируем DLQ envelope
+    // Санитизируем error message перед отправкой
+    const sanitizedErrorMessage = sanitizeErrorMessage(error.message);
     const envelope: DlqEnvelope = {
       originalValue: originalMessage.value,
       topic: originalMessage.topic,
       partition: originalMessage.partition,
       offset: String(originalMessage.offset),
-      errorMessage: error.message,
+      errorMessage: sanitizedErrorMessage,
       failedAt: new Date().toISOString(),
+      originalKey: originalMessage.originalKey ?? null,
     };
 
     // Формируем Kafka record

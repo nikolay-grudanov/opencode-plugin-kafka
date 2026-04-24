@@ -9,9 +9,7 @@
  * @see https://kafka.js.org/docs/producing
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
-import { Kafka, type Consumer, type Producer } from 'kafkajs';
+import { Kafka, type Consumer, type Producer, type SASLOptions } from 'kafkajs';
 import { kafkaEnvSchema, type KafkaEnv } from '../schemas/index.js';
 
 /**
@@ -44,10 +42,6 @@ export function createKafkaClient(env: NodeJS.ProcessEnv): { kafka: Kafka; valid
   const trimmedBrokers = validatedEnv.KAFKA_BROKERS.trim();
   const brokers = trimmedBrokers.split(',').map((b) => b.trim());
 
-  // Мутируем validatedEnv чтобы вернуть trimmed значение
-  // (приемлемо для этого use case, т.к. улучшает UX)
-  (validatedEnv as any).KAFKA_BROKERS = trimmedBrokers;
-
   // Создаём конфигурацию для Kafka клиента
   const kafkaConfig: ConstructorParameters<typeof Kafka>[0] = {
     clientId: validatedEnv.KAFKA_CLIENT_ID,
@@ -61,11 +55,11 @@ export function createKafkaClient(env: NodeJS.ProcessEnv): { kafka: Kafka; valid
 
   // Configures SASL if KAFKA_USERNAME + KAFKA_PASSWORD set
   if (validatedEnv.KAFKA_USERNAME && validatedEnv.KAFKA_PASSWORD) {
-    const saslConfig = {
+    const saslConfig: SASLOptions = {
       mechanism: (validatedEnv.KAFKA_SASL_MECHANISM || 'plain') as 'plain' | 'scram-sha-256' | 'scram-sha-512',
       username: validatedEnv.KAFKA_USERNAME,
       password: validatedEnv.KAFKA_PASSWORD,
-    } as any; // TypeScript типы для SASL очень строгие, используем any для обхода
+    };
     kafkaConfig.sasl = saslConfig;
   }
 
@@ -125,7 +119,28 @@ export function createConsumer(kafka: Kafka, groupId: string): Consumer {
 export function createDlqProducer(kafka: Kafka): Producer {
   // Создаём отдельный producer для DLQ
   // Это отдельный экземпляр от любого основного producer
-  const producer = kafka.producer();
+  // allowAutoTopicCreation: false — DLQ топики должны быть созданы заранее
+  const producer = kafka.producer({ allowAutoTopicCreation: false });
 
+  return producer;
+}
+
+/**
+ * Создаёт отдельный Producer для отправки ответов агентов.
+ *
+ * FR-022: dedicated producer for agent response sends;
+ *         separate instance from DLQ producer для изоляции
+ *
+ * @param kafka - Kafka клиент (созданный через createKafkaClient)
+ * @returns Kafka Producer для отправки ответов
+ *
+ * @example
+ * ```ts
+ * const kafka = createKafkaClient(process.env);
+ * const responseProducer = await createResponseProducer(kafka);
+ * ```
+ */
+export function createResponseProducer(kafka: Kafka): Producer {
+  const producer = kafka.producer({ allowAutoTopicCreation: false });
   return producer;
 }

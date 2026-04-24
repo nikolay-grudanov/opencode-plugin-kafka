@@ -3,47 +3,75 @@
 ## Tech Stack
 
 - **TypeScript 6.x** (ES2022 target, ESNext modules, `moduleResolution: bundler`)
-- **zod** — runtime config validation via Zod schemas
-- **jsonpath-plus** — JSONPath queries для фильтрации сообщений
+- **kafkajs** — Kafka client
+- **zod** — runtime config validation
+- **jsonpath-plus** — JSONPath queries (routing.ts, prompt.ts)
 - **vitest** — unit + integration testing
-- **testcontainers-node + Redpanda** — integration tests (не Apache Kafka)
+- **testcontainers-node + Redpanda** — integration tests (НЕ Apache Kafka)
+- **npm** — package manager (НЕ yarn/pnpm)
+- **Node.js 20** в CI
 
 ## Команды
 
 ```bash
-npm run check        # lint + test (порядок важен)
-npm run lint         # eslint src/**/*.ts
-npx vitest run         # vitest
-npm run test:coverage # vitest --coverage
-npx vitest tests/unit/routing.test.ts  # конкретный файл
+npm run check              # lint + test (без typecheck и build)
+npm run lint               # eslint src/**/*.ts tests/**/*.ts
+npm run typecheck          # tsc --noEmit
+npm run test               # vitest run (unit tests, integration исключены)
+npm run test:coverage      # vitest --coverage
+npm run test:integration   # vitest --config vitest.integration.config.ts (нужен Docker/Podman)
+npm run build              # tsc
+npm run format             # prettier --write "src/**/*.ts"
+npx vitest run tests/unit/routing.test.ts  # один тест-файл
 ```
 
+## CI Pipeline (GitHub Actions)
+
+Порядок: lint → typecheck → test → build
+Интеграционные тесты НЕ в CI — требуют container runtime (Docker/Podman)
+CI: ubuntu-latest, Node.js 20
 
 ## Coverage Threshold
 
 **90%** для lines, branches, functions, statements.
 
-**Важно**: Из coverage исключены type-only файлы:
-- `src/core/types.ts`
-- `src/core/index.ts`
-
-Эти файлы содержат только интерфейсы и re-exports — они не имеют runtime кода.
+Исключены из coverage:
+- `src/core/types.ts` (если существует)
+- `src/core/index.ts` (только re-exports)
+- `**/*.d.ts` файлы
+- Тесты, конфиги, dist
 
 ## Структура
 
 ```
 src/
+├── index.ts                    # Plugin entry point (exports default plugin function)
 ├── core/
-│   ├── config.ts    # parseConfig (Zod validation + FR-017 topic coverage)
-│   ├── routing.ts   # matchRule — pure function
-│   ├── prompt.ts    # buildPrompt (String() для примитивов)
-│   └── index.ts     # Public API (re-exports из schemas)
+│   ├── config.ts               # parseConfig, parseConfigV003, validateTopicCoverage
+│   ├── routing.ts              # matchRuleV003 — pure function (Domain Isolation)
+│   ├── prompt.ts               # buildPromptV003
+│   └── index.ts                # Public API re-exports
 ├── schemas/
-│   └── index.ts     # Zod schemas + types (z.infer<>)
-└── index.ts         # Plugin entry point
+│   └── index.ts                # Zod schemas + types via z.infer<>
+│                                # RuleV003Schema, PluginConfigV003Schema, KafkaEnv
+│                                # Legacy: RuleSchema, PluginConfigSchema
+│                                # Shared: Payload, KafkaMessage, ProcessingResult
+├── kafka/
+│   ├── client.ts               # createKafkaClient, createConsumer, createDlqProducer, createResponseProducer
+│   ├── consumer.ts             # eachMessageHandler, startConsumer, performGracefulShutdown
+│   ├── dlq.ts                  # sendToDlq, DlqEnvelope
+│   └── response-producer.ts    # sendResponse, ResponseMessage
+├── opencode/
+│   ├── IOpenCodeAgent.ts       # Interface: AgentResult, InvokeOptions
+│   ├── OpenCodeAgentAdapter.ts # Production adapter
+│   ├── MockOpenCodeAgent.ts    # Test mock
+│   └── AgentError.ts           # TimeoutError, AgentError
+└── types/
+    ├── opencode-plugin.d.ts    # PluginContext, PluginHooks declarations
+    └── opencode-sdk.d.ts       # SDKClient, SessionsAPI declarations
 
 tests/
-├── unit/            # pure function tests (vitest)
+├── unit/            # pure function tests
 │   ├── config.test.ts
 │   ├── routing.test.ts
 │   ├── prompt.test.ts
@@ -51,17 +79,22 @@ tests/
 └── integration/     # testcontainers + Redpanda
 ```
 
-## Типы (spec 002)
+## Импорт типов — КРИТИЧЕСКОЕ ПРАВИЛО
 
-**Важно**: `src/core/types.ts` УДАЛЁН. Типы `Rule`, `PluginConfig`, `Payload` экспортируются из `src/schemas/index.ts` через `z.infer<>`:
+`src/core/types.ts` УДАЛЁН. Типы экспортируются из `src/schemas/index.ts` через `z.infer<>`:
 
 ```typescript
-// Правильный импорт
-import type { Rule } from '../schemas/index.js';
+// ✅ Правильно
+import type { RuleV003 } from '../schemas/index.js';
+import type { PluginConfigV003 } from '../schemas/index.js';
 
-// Неправильно (types.ts удалён)
-import type { Rule } from '../core/types'; // ← НЕ СУЩЕСТВУЕТ
+// ❌ Неправильно — файл не существует
+import type { Rule } from '../core/types';
 ```
+
+## Версионированные схемы
+
+Текущая версия API — V003 (spec 003). Legacy-схемы (RuleSchema, PluginConfigSchema) сохранены для обратной совместимости, но активный код использует V003-варианты.
 
 ## Конституция (5 NON-NEGOTIABLE принципов)
 
@@ -73,37 +106,34 @@ import type { Rule } from '../core/types'; // ← НЕ СУЩЕСТВУЕТ
 4. **No-State Consumer** — никакого session state между сообщениями
 5. **Test-First Development** — unit tests писать до имплементации, 90%+ coverage
 
+## Spec-Driven Development
+
+Feature specs в `specs/` (001–006). Каждый spec содержит: spec.md, plan.md, tasks.md, research.md, contracts/, checklists/.
+ADR docs в `docs/architecture/` (ADR-001–ADR-007).
+
 ## Integration Tests
 
-**Только Redpanda** (не Apache Kafka). Причина: 10-100x быстрее запуск в CI/CD.
+**Только Redpanda** (НЕ Apache Kafka). Причина: 10-100x быстрее запуск в CI/CD.
+Требуют Docker или Podman локально.
+Запуск: `npm run test:integration`
+
+## Два Vitest Config
+
+- `vitest.config.ts` — unit tests, исключает integration, coverage thresholds (90%)
+- `vitest.integration.config.ts` — только integration tests, 60s timeout для запуска контейнера
 
 ## OpenCode Config
 
-Агент читает инструкции из `.opencode/rules/*.md` (behavioral-guidelines, planning-workflow, language-safety).
+Инструкции агентов в `.opencode/rules/*.md` (behavioral-guidelines, planning-workflow, language-safety).
+Кастомные агенты в `.opencode/agents/`.
+Skills в `.opencode/skills/`.
+Commands в `.opencode/command/`.
 
-## Active Technologies
-- TypeScript 6.x (ES2022 target, ESNext modules, `moduleResolution: bundler`) + `kafkajs` (Kafka client), `zod` (runtime validation), `jsonpath-plus` (JSONPath queries), `vitest` (testing), `testcontainers-node` + `Redpanda` (integration tests) (003-kafka-consumer)
-- N/A (Kafka-based message queue, no local persistence) (003-kafka-consumer)
-- TypeScript 6.x (ES2022 target, ESNext modules, `moduleResolution: bundler`) + kafkajs (Kafka client), zod (runtime validation), vitest (testing), testcontainers-node (integration testing), Redpanda (Kafka-compatible message broker) (005-ci-integration)
+## Известные пробелы
 
-## Recent Changes
-- 003-kafka-consumer: Added TypeScript 6.x (ES2022 target, ESNext modules, `moduleResolution: bundler`) + `kafkajs` (Kafka client), `zod` (runtime validation), `jsonpath-plus` (JSONPath queries), `vitest` (testing), `testcontainers-node` + `Redpanda` (integration tests)
-
-## Known Issues & Technical Debt
-
-### Coverage 57.37% — требуются integration tests с real Redpanda
-
-**Проблема**: `src/kafka/consumer.ts` имеет покрытие 39.82% из-за сложной логики с Kafka API.
-
-**Текущее состояние**:
-- Unit tests для pure functions (routing, prompt, dlq) — 100% coverage ✅
-- `consumer.ts` требует integration tests с реальным Redpanda контейнером
-- Unit tests для consumer.ts невозможны без моков Kafka API
-
-**Требуется**:
-1. Integration tests с real Redpanda для `consumer.ts` (eachMessageHandler, graceful shutdown)
-2. CI/CD environment с Docker/Podman для запуска Redpanda
-3. Или исключение `consumer.ts` из coverage threshold
+- `src/kafka/consumer.ts` (984 строки) — сложная Kafka API логика, тяжело покрыть unit-тестами без моков
+- Интеграционные тесты требуют container runtime — недоступны в текущем CI
+- Consumer integration tests нуждаются в real Redpanda для осмысленного coverage
 
 ## Принцип: Баги решаются сразу
 

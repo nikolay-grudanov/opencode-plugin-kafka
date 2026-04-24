@@ -10,7 +10,7 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "removeComments": true,
-    "noEmit": false,
+    "noEmit": true,
     "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,

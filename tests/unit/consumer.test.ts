@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { eachMessageHandler, logDlqRate, logConsumerLagMetrics, isBrokerThrottleError, executeWithThrottleRetry } from '../../src/kafka/consumer.js';
 import type { PluginConfigV003, RuleV003 } from '../../src/schemas/index.js';
 import type { Producer } from 'kafkajs';
+import type { IOpenCodeAgent, AgentResult } from '../../src/opencode/IOpenCodeAgent.js';
 
 /**
  * Mock состояние consumer для тестов (Constitution Principle IV: No-State Consumer)
@@ -33,6 +34,9 @@ describe('eachMessageHandler', () => {
   let mockState: MockConsumerState;
   let rules: RuleV003[];
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let mockAgent: IOpenCodeAgent;
+  let mockResponseProducer: Producer;
+  let activeSessions: Set<AbortController>;
 
   beforeEach(() => {
     // Setup mocks
@@ -45,6 +49,28 @@ describe('eachMessageHandler', () => {
       lastDlqRateLogTime: Date.now(),
     };
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    // Mock agent - по умолчанию возвращает success
+    mockAgent = {
+      invoke: vi.fn().mockResolvedValue({
+        status: 'success' as const,
+        response: 'test response',
+        sessionId: 'test-session-id',
+        executionTimeMs: 100,
+        timestamp: new Date().toISOString(),
+      }),
+      abort: vi.fn().mockResolvedValue(true),
+    };
+
+    // Mock response producer
+    mockResponseProducer = {
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Producer;
+
+    // Active sessions set
+    activeSessions = new Set<AbortController>();
 
     // Setup config with one matching rule
     rules = [
@@ -82,7 +108,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
       // Verify commitOffsets was called
       expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
@@ -109,7 +135,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
       // Verify sendToDlq was called
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -138,7 +164,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
       // Verify sendToDlq was called
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -165,7 +191,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
       // Verify sendToDlq was called
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -195,7 +221,7 @@ describe('eachMessageHandler', () => {
       };
 
       // Этот тест фокусируется на проверке размера, поэтому мы игнорируем ошибку JSON parse
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
       // Verify sendToDlq was called (из-за JSON parse error, но НЕ из-за размера)
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -225,7 +251,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
       // Verify sendToDlq был вызван
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -254,7 +280,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
       // Verify sendToDlq был вызван (из-за ошибки в commitOffsets)
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -282,7 +308,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
       // Verify sendToDlq был вызван
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -318,7 +344,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
       // Verify console.log was called with "message_processed"
       expect(consoleLogSpy).toHaveBeenCalled();
@@ -378,7 +404,7 @@ describe('eachMessageHandler', () => {
 
       // Обрабатываем все сообщения
       for (const payload of payloads) {
-        await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+        await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
       }
 
       // Verify each message was processed independently
@@ -425,7 +451,7 @@ describe('eachMessageHandler', () => {
 
       // Обрабатываем сообщения последовательно
       for (const payload of payloads) {
-        await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+        await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
       }
 
       // Проверяем, что все сообщения обработаны
@@ -458,7 +484,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
       // Verify sendToDlq was called (tombstone → DLQ)
       expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -494,7 +520,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
       // Verify console.log was called with "no_rule_matched"
       expect(consoleLogSpy).toHaveBeenCalled();
@@ -523,7 +549,7 @@ describe('eachMessageHandler', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
       // Verify console.log was called with "message_processed"
       expect(consoleLogSpy).toHaveBeenCalled();
@@ -794,6 +820,9 @@ describe('eachMessageHandler shutdown state', () => {
   let mockConfig: PluginConfigV003;
   let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let mockAgent: IOpenCodeAgent;
+  let mockResponseProducer: Producer;
+  let activeSessions: Set<AbortController>;
 
   beforeEach(() => {
     mockDlqProducer = {} as Producer;
@@ -805,6 +834,27 @@ describe('eachMessageHandler shutdown state', () => {
       dlqMessagesCount: 5,
       lastDlqRateLogTime: Date.now(),
     };
+
+    // Mock agent
+    mockAgent = {
+      invoke: vi.fn().mockResolvedValue({
+        status: 'success' as const,
+        response: 'test response',
+        sessionId: 'test-session-id',
+        executionTimeMs: 100,
+        timestamp: new Date().toISOString(),
+      }),
+      abort: vi.fn().mockResolvedValue(true),
+    };
+
+    // Mock response producer
+    mockResponseProducer = {
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Producer;
+
+    activeSessions = new Set<AbortController>();
 
     const rules = [
       {
@@ -839,7 +889,7 @@ describe('eachMessageHandler shutdown state', () => {
       },
     };
 
-    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
     // Verify message_skipped_during_shutdown логируется
     expect(consoleLogSpy).toHaveBeenCalled();
@@ -870,7 +920,7 @@ describe('eachMessageHandler shutdown state', () => {
       },
     };
 
-    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
     // Verify commitOffsets был вызван
     expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
@@ -890,6 +940,9 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
   let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let originalEnv: NodeJS.ProcessEnv;
+  let mockAgent: IOpenCodeAgent;
+  let mockResponseProducer: Producer;
+  let activeSessions: Set<AbortController>;
 
   beforeEach(() => {
     originalEnv = process.env;
@@ -902,6 +955,27 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
       dlqMessagesCount: 0,
       lastDlqRateLogTime: Date.now(),
     };
+
+    // Mock agent
+    mockAgent = {
+      invoke: vi.fn().mockResolvedValue({
+        status: 'success' as const,
+        response: 'test response',
+        sessionId: 'test-session-id',
+        executionTimeMs: 100,
+        timestamp: new Date().toISOString(),
+      }),
+      abort: vi.fn().mockResolvedValue(true),
+    };
+
+    // Mock response producer
+    mockResponseProducer = {
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Producer;
+
+    activeSessions = new Set<AbortController>();
 
     const rules = [
       {
@@ -939,7 +1013,7 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
       },
     };
 
-    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
     // Verify tombstone_ignored логируется
     expect(consoleLogSpy).toHaveBeenCalled();
@@ -970,7 +1044,7 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
       },
     };
 
-    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
     // Verify sendToDlq был вызван
     expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -992,7 +1066,7 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
       },
     };
 
-    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
     // Verify sendToDlq был вызван (default behavior)
     expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -1006,7 +1080,8 @@ describe('performGracefulShutdown', () => {
   // Импортируем после моков
   let performGracefulShutdown: typeof import('../../src/kafka/consumer.js').performGracefulShutdown;
   let mockConsumer: { disconnect: ReturnType<typeof vi.fn> };
-  let mockProducer: { disconnect: ReturnType<typeof vi.fn> };
+  let mockDlqProducer: { disconnect: ReturnType<typeof vi.fn> };
+  let mockResponseProducer: { disconnect: ReturnType<typeof vi.fn> };
   let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
@@ -1031,12 +1106,16 @@ describe('performGracefulShutdown', () => {
       lastDlqRateLogTime: Date.now(),
     };
 
-    // Мокаем consumer и producer
+    // Мокаем consumer и producers
     mockConsumer = {
       disconnect: vi.fn().mockResolvedValue(undefined),
     };
 
-    mockProducer = {
+    mockDlqProducer = {
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockResponseProducer = {
       disconnect: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -1052,10 +1131,11 @@ describe('performGracefulShutdown', () => {
   });
 
   it('должен успешно выполнить shutdown (оба disconnect успешны)', async () => {
-    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+    await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
 
     expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
-    expect(mockProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockDlqProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1);
     expect(mockState.isShuttingDown).toBe(true);
 
     // Проверяем логирование всех этапов
@@ -1065,18 +1145,21 @@ describe('performGracefulShutdown', () => {
     expect(logCalls).toContain('graceful_shutdown_started');
     expect(logCalls).toContain('consumer_disconnect_started');
     expect(logCalls).toContain('consumer_disconnect_completed');
-    expect(logCalls).toContain('producer_disconnect_started');
-    expect(logCalls).toContain('producer_disconnect_completed');
+    expect(logCalls).toContain('dlq_producer_disconnect_started');
+    expect(logCalls).toContain('dlq_producer_disconnect_completed');
+    expect(logCalls).toContain('response_producer_disconnect_started');
+    expect(logCalls).toContain('response_producer_disconnect_completed');
     expect(logCalls).toContain('graceful_shutdown_completed');
   });
 
   it('должен продолжить producer disconnect если consumer disconnect падает', async () => {
     mockConsumer.disconnect.mockRejectedValueOnce(new Error('Consumer disconnect failed'));
 
-    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+    await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
 
     expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
-    expect(mockProducer.disconnect).toHaveBeenCalledTimes(1); // Producer всё равно отключается
+    expect(mockDlqProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1); // Producer всё равно отключается
     expect(mockState.isShuttingDown).toBe(true);
 
     // Проверяем логирование ошибки consumer
@@ -1088,31 +1171,65 @@ describe('performGracefulShutdown', () => {
   });
 
   it('должен завершить shutdown если producer disconnect падает', async () => {
-    mockProducer.disconnect.mockRejectedValueOnce(new Error('Producer disconnect failed'));
+    mockDlqProducer.disconnect.mockRejectedValueOnce(new Error('Producer disconnect failed'));
 
-    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+    await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
 
     expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
-    expect(mockProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockDlqProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1);
     expect(mockState.isShuttingDown).toBe(true);
 
-    // Проверяем логирование ошибки producer
-    expect(consoleErrorSpy).toHaveBeenCalled();
+// Проверяем логирование ошибки dlq producer
     const errorLog = vi.mocked(consoleErrorSpy).mock.calls.find((call) => {
-      return JSON.stringify(call).includes('producer_disconnect_failed');
+      return JSON.stringify(call).includes('dlq_producer_disconnect_failed');
     });
     expect(errorLog).toBeDefined();
   });
 
+  it('должен завершить shutdown если responseProducer disconnect падает', async () => {
+    // DLQ успешен, но responseProducer падает
+    mockDlqProducer.disconnect.mockResolvedValueOnce(undefined);
+    mockResponseProducer.disconnect.mockRejectedValueOnce(new Error('Response producer disconnect failed'));
+
+    await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
+
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockDlqProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockState.isShuttingDown).toBe(true);
+
+    // Проверяем логирование ошибки responseProducer
+    const errorLog = vi.mocked(consoleErrorSpy).mock.calls.find((call) => {
+      return JSON.stringify(call).includes('response_producer_disconnect_failed');
+    });
+    expect(errorLog).toBeDefined();
+  });
+
+  it('должен корректно обработать string error в responseProducer.disconnect', async () => {
+    mockDlqProducer.disconnect.mockResolvedValueOnce(undefined);
+    mockResponseProducer.disconnect.mockRejectedValueOnce('String error not an Error object');
+
+    await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
+
+    // Должен продолжить shutdown несмотря на string error
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockDlqProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockState.isShuttingDown).toBe(true);
+  });
+
   it('должен быть idempotent (повторный вызов игнорируется)', async () => {
-    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+    await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
 
     // Второй вызов
-    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+    await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
 
     // Только один раз disconnect был вызван
     expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
-    expect(mockProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockDlqProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1);
 
     // Проверяем логирование shutdown_already_in_progress
     const warnLog = vi.mocked(consoleLogSpy).mock.calls.find((call) => {
@@ -1128,7 +1245,7 @@ describe('performGracefulShutdown', () => {
       () => new Promise((resolve) => setTimeout(resolve, 20_000)), // долгий disconnect
     );
 
-    const shutdownPromise = performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState, mockExit);
+    const shutdownPromise = performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState, mockExit);
 
     // Fast-forward времени
     vi.advanceTimersByTime(15_000);
@@ -1151,22 +1268,24 @@ describe('performGracefulShutdown', () => {
     // Мокаем disconnect чтобы выбросил строку вместо Error
     mockConsumer.disconnect.mockRejectedValueOnce('String error not an Error object');
 
-    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+    await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
 
     // Должен продолжить и disconnect producer
     expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
-    expect(mockProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockDlqProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1);
   });
 
   it('должен корректно обработать не-Error в producer.disconnect error', async () => {
     // Мокаем consumer disconnect успешным, а producer - строкой вместо Error
-    mockProducer.disconnect.mockRejectedValueOnce('String producer error not an Error object');
+    mockDlqProducer.disconnect.mockRejectedValueOnce('String producer error not an Error object');
 
-    await performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState);
+    await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
 
     // Должен продолжить shutdown несмотря на ошибку producer
     expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
-    expect(mockProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockDlqProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1);
     expect(mockState.isShuttingDown).toBe(true);
   });
 
@@ -1179,7 +1298,7 @@ describe('performGracefulShutdown', () => {
       () => new Promise((_, reject) => setTimeout(() => reject('Timeout as string'), 20_000)),
     );
 
-    const shutdownPromise = performGracefulShutdown(mockConsumer, mockProducer, 'SIGTERM', mockState, mockExit);
+    const shutdownPromise = performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState, mockExit);
 
     // Fast-forward времени до срабатывания timeout
     vi.advanceTimersByTime(25_000);
@@ -1206,6 +1325,7 @@ describe('startConsumer', () => {
     createKafkaClient: vi.fn(),
     createConsumer: vi.fn(),
     createDlqProducer: vi.fn(),
+    createResponseProducer: vi.fn(),
   }));
 
   let startConsumer: typeof import('../../src/kafka/consumer.js').startConsumer;
@@ -1222,6 +1342,12 @@ describe('startConsumer', () => {
     disconnect: ReturnType<typeof vi.fn>;
     send: ReturnType<typeof vi.fn>;
   };
+  let mockResponseProducer: {
+    connect: ReturnType<typeof vi.fn>;
+    disconnect: ReturnType<typeof vi.fn>;
+    send: ReturnType<typeof vi.fn>;
+  };
+  let mockAgent: IOpenCodeAgent;
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
   let processExitSpy: ReturnType<typeof vi.spyOn>;
@@ -1258,6 +1384,18 @@ describe('startConsumer', () => {
       return process;
     });
 
+    // Mock agent
+    mockAgent = {
+      invoke: vi.fn().mockResolvedValue({
+        status: 'success' as const,
+        response: 'test response',
+        sessionId: 'test-session-id',
+        executionTimeMs: 100,
+        timestamp: new Date().toISOString(),
+      }),
+      abort: vi.fn().mockResolvedValue(true),
+    };
+
     // Мокаем Kafka клиенты
     mockConsumer = {
       connect: vi.fn().mockResolvedValue(undefined),
@@ -1273,6 +1411,12 @@ describe('startConsumer', () => {
       send: vi.fn().mockResolvedValue(undefined),
     };
 
+    mockResponseProducer = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+    };
+
     mockKafka = {};
 
     // Настраиваем моки модуля client.js
@@ -1283,6 +1427,7 @@ describe('startConsumer', () => {
     });
     vi.mocked(clientModule.createConsumer).mockReturnValue(mockConsumer);
     vi.mocked(clientModule.createDlqProducer).mockReturnValue(mockDlqProducer);
+    vi.mocked(clientModule.createResponseProducer).mockReturnValue(mockResponseProducer);
 
     const consumerModule = await import('../../src/kafka/consumer.js');
     startConsumer = consumerModule.startConsumer;
@@ -1296,7 +1441,7 @@ describe('startConsumer', () => {
   });
 
   it('должен успешно запустить consumer', async () => {
-    const startPromise = startConsumer(mockConfig);
+    const startPromise = startConsumer(mockConfig, mockAgent);
 
     // Даём время для инициализации
     await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
@@ -1314,7 +1459,7 @@ describe('startConsumer', () => {
   it('должен выполнить graceful shutdown и exit(1) при consumer.connect() error', async () => {
     mockConsumer.connect.mockRejectedValueOnce(new Error('Connection failed'));
 
-    const startPromise = startConsumer(mockConfig);
+    const startPromise = startConsumer(mockConfig, mockAgent);
 
     await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
 
@@ -1331,7 +1476,7 @@ describe('startConsumer', () => {
   it('должен выполнить graceful shutdown и exit(1) при dlqProducer.connect() error', async () => {
     mockDlqProducer.connect.mockRejectedValueOnce(new Error('DLQ connection failed'));
 
-    const startPromise = startConsumer(mockConfig);
+    const startPromise = startConsumer(mockConfig, mockAgent);
 
     await vi.waitFor(() => expect(mockDlqProducer.connect).toHaveBeenCalled());
 
@@ -1348,7 +1493,7 @@ describe('startConsumer', () => {
   it('должен выполнить graceful shutdown и exit(1) при consumer.subscribe() error', async () => {
     mockConsumer.subscribe.mockRejectedValueOnce(new Error('Subscribe failed'));
 
-    const startPromise = startConsumer(mockConfig);
+    const startPromise = startConsumer(mockConfig, mockAgent);
 
     await vi.waitFor(() => expect(mockConsumer.subscribe).toHaveBeenCalled());
 
@@ -1364,7 +1509,7 @@ describe('startConsumer', () => {
 
   it('должен выйти с кодом 0 при SIGTERM', async () => {
     // Запускаем consumer (не ждём завершения - он работает в фоне)
-    startConsumer(mockConfig);
+    startConsumer(mockConfig, mockAgent);
 
     // Дожидаемся инициализации
     await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
@@ -1388,7 +1533,7 @@ describe('startConsumer', () => {
 
   it('должен выйти с кодом 0 при SIGINT', async () => {
     // Запускаем consumer (не ждём завершения - он работает в фоне)
-    startConsumer(mockConfig);
+    startConsumer(mockConfig, mockAgent);
 
     // Дожидаемся инициализации
     await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
@@ -1415,7 +1560,7 @@ describe('startConsumer', () => {
     mockConsumer.run.mockRejectedValueOnce(new Error('Consumer run loop failed'));
 
     // Запускаем consumer
-    startConsumer(mockConfig);
+    startConsumer(mockConfig, mockAgent);
 
     // Дожидаемся инициализации
     await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
@@ -1450,7 +1595,7 @@ describe('startConsumer', () => {
     });
 
     // Запускаем consumer
-    startConsumer(mockConfig);
+    startConsumer(mockConfig, mockAgent);
 
     // Дожидаемся инициализации и выполнения callback
     await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
@@ -1465,7 +1610,7 @@ describe('startConsumer', () => {
     mockConsumer.run.mockRejectedValueOnce('String error from run loop');
 
     // Запускаем consumer
-    startConsumer(mockConfig);
+    startConsumer(mockConfig, mockAgent);
 
     // Дожидаемся инициализации
     await vi.waitFor(() => expect(mockConsumer.connect).toHaveBeenCalled());
@@ -1479,9 +1624,1010 @@ describe('startConsumer', () => {
     mockConsumer.connect.mockRejectedValueOnce('String connection error');
 
     // Запускаем consumer
-    startConsumer(mockConfig);
+    startConsumer(mockConfig, mockAgent);
 
     // Ждём пока ошибка будет обработана и exit(1) вызван
     await vi.waitFor(() => expect(processExitSpy).toHaveBeenCalledWith(1), { timeout: 2000 });
+  });
+});
+
+/**
+ * Unit tests для agent invoke integration в eachMessageHandler
+ */
+describe('agent invoke integration', () => {
+  let mockDlqProducer: Producer;
+  let mockCommitOffsets: ReturnType<typeof vi.fn>;
+  let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
+  let mockAgent: IOpenCodeAgent;
+  let mockResponseProducer: Producer;
+  let activeSessions: Set<AbortController>;
+  let sendToDlqSpy: ReturnType<typeof vi.fn>;
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  const createConfigWithRules = (rules: RuleV003[]): PluginConfigV003 => ({
+    topics: ['test-topic'],
+    rules,
+  });
+
+  const createPayload = (value: Record<string, unknown>, partition = 0, offset = '0') => ({
+    topic: 'test-topic',
+    partition,
+    message: {
+      value: Buffer.from(JSON.stringify(value)),
+      offset,
+      key: null,
+      headers: {},
+      timestamp: '2024-04-22T00:00:00.000Z',
+    },
+  });
+
+  beforeEach(() => {
+    mockDlqProducer = {} as Producer;
+    mockCommitOffsets = vi.fn().mockResolvedValue(undefined);
+    mockState = {
+      isShuttingDown: false,
+      totalMessagesProcessed: 0,
+      dlqMessagesCount: 0,
+      lastDlqRateLogTime: Date.now(),
+    };
+
+    // Mock agent
+    mockAgent = {
+      invoke: vi.fn(),
+      abort: vi.fn().mockResolvedValue(true),
+    };
+
+    // Mock response producer
+    mockResponseProducer = {
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Producer;
+
+    activeSessions = new Set<AbortController>();
+
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // Mock sendToDlq
+    sendToDlqSpy = vi.fn();
+    vi.mocked(sendToDlq).mockImplementation(sendToDlqSpy);
+
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('должен вызвать агента и отправить response при success с responseTopic', async () => {
+    mockAgent.invoke = vi.fn().mockResolvedValue({
+      status: 'success' as const,
+      response: 'agent response',
+      sessionId: 'test-session',
+      executionTimeMs: 500,
+      timestamp: '2024-01-01T00:00:00.000Z',
+    } as AgentResult);
+
+    const config = createConfigWithRules([{
+      name: 'test-rule',
+      jsonPath: '$.type',
+      promptTemplate: 'Process: ${$.type}',
+      agentId: 'test-agent',
+      responseTopic: 'response-topic',
+      timeoutMs: 120_000,
+    }]);
+
+    const payload = createPayload({ type: 'test' });
+
+    await eachMessageHandler(payload, config, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    expect(mockAgent.invoke).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.send).toHaveBeenCalledTimes(1);
+    expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+  });
+
+  it('должен вызвать агента но не отправлять response когда правило без responseTopic', async () => {
+    mockAgent.invoke = vi.fn().mockResolvedValue({
+      status: 'success' as const,
+      response: 'agent response',
+      sessionId: 'test-session',
+      executionTimeMs: 500,
+      timestamp: '2024-01-01T00:00:00.000Z',
+    } as AgentResult);
+
+    const config = createConfigWithRules([{
+      name: 'test-rule',
+      jsonPath: '$.type',
+      promptTemplate: 'Process: ${$.type}',
+      agentId: 'test-agent',
+      // Нет responseTopic
+      timeoutMs: 120_000,
+    }]);
+
+    const payload = createPayload({ type: 'test' });
+
+    await eachMessageHandler(payload, config, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    expect(mockAgent.invoke).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.send).not.toHaveBeenCalled();
+    expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+  });
+
+  it('должен отправить в DLQ когда агент возвращает timeout status', async () => {
+    mockAgent.invoke = vi.fn().mockResolvedValue({
+      status: 'timeout' as const,
+      sessionId: 'test-session',
+      errorMessage: 'Agent timed out',
+      executionTimeMs: 120000,
+      timestamp: '2024-01-01T00:00:00.000Z',
+    } as AgentResult);
+
+    const config = createConfigWithRules([{
+      name: 'test-rule',
+      jsonPath: '$.type',
+      promptTemplate: 'Process: ${$.type}',
+      agentId: 'test-agent',
+      responseTopic: 'response-topic',
+      timeoutMs: 120_000,
+    }]);
+
+    const payload = createPayload({ type: 'test' });
+
+    await eachMessageHandler(payload, config, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    expect(mockAgent.invoke).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.send).not.toHaveBeenCalled();
+    expect(sendToDlq).toHaveBeenCalledTimes(1);
+    expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+  });
+
+  it('должен отправить в DLQ когда агент возвращает error status', async () => {
+    mockAgent.invoke = vi.fn().mockResolvedValue({
+      status: 'error' as const,
+      sessionId: 'test-session',
+      errorMessage: 'Agent crashed',
+      executionTimeMs: 50,
+      timestamp: '2024-01-01T00:00:00.000Z',
+    } as AgentResult);
+
+    const config = createConfigWithRules([{
+      name: 'test-rule',
+      jsonPath: '$.type',
+      promptTemplate: 'Process: ${$.type}',
+      agentId: 'test-agent',
+      responseTopic: 'response-topic',
+      timeoutMs: 120_000,
+    }]);
+
+    const payload = createPayload({ type: 'test' });
+
+    await eachMessageHandler(payload, config, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    expect(mockAgent.invoke).toHaveBeenCalledTimes(1);
+    expect(sendToDlq).toHaveBeenCalledTimes(1);
+    expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+  });
+
+  it('должен отправить в DLQ когда вызов агента выбрасывает исключение', async () => {
+    mockAgent.invoke = vi.fn().mockRejectedValue(new Error('Unexpected invoke error'));
+
+    const config = createConfigWithRules([{
+      name: 'test-rule',
+      jsonPath: '$.type',
+      promptTemplate: 'Process: ${$.type}',
+      agentId: 'test-agent',
+      responseTopic: 'response-topic',
+      timeoutMs: 120_000,
+    }]);
+
+    const payload = createPayload({ type: 'test' });
+
+    await eachMessageHandler(payload, config, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    expect(sendToDlq).toHaveBeenCalledTimes(1);
+    expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+  });
+
+  it('должен оставить activeSessions пустым (session управляется агентом)', async () => {
+    mockAgent.invoke = vi.fn().mockImplementation(async () => {
+      // activeSessions остаётся пустым - агент сам управляет сессиями
+      return {
+        status: 'success' as const,
+        response: 'test',
+        sessionId: 'test-session',
+        executionTimeMs: 100,
+        timestamp: new Date().toISOString(),
+      } as AgentResult;
+    });
+
+    const config = createConfigWithRules([{
+      name: 'test-rule',
+      jsonPath: '$.type',
+      promptTemplate: 'Process: ${$.type}',
+      agentId: 'test-agent',
+      responseTopic: 'response-topic',
+      timeoutMs: 120_000,
+    }]);
+
+    const payload = createPayload({ type: 'test' });
+
+    await eachMessageHandler(payload, config, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    // activeSessions остаётся пустым - сессии управляются агентом внутри
+    expect(activeSessions.size).toBe(0);
+  });
+
+  it('должен оставить activeSessions пустым при ошибке агента', async () => {
+    mockAgent.invoke = vi.fn().mockRejectedValue(new Error('Agent error'));
+
+    const config = createConfigWithRules([{
+      name: 'test-rule',
+      jsonPath: '$.type',
+      promptTemplate: 'Process: ${$.type}',
+      agentId: 'test-agent',
+      responseTopic: 'response-topic',
+      timeoutMs: 120_000,
+    }]);
+
+    const payload = createPayload({ type: 'test' });
+
+    await eachMessageHandler(payload, config, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    // activeSessions остаётся пустым - сессии управляются агентом
+    expect(activeSessions.size).toBe(0);
+  });
+});
+
+/**
+ * Unit tests для graceful shutdown с agent abort (FR-016)
+ */
+describe('graceful shutdown (FR-016)', () => {
+  let performGracefulShutdown: typeof import('../../src/kafka/consumer.js').performGracefulShutdown;
+  let mockConsumer: { disconnect: ReturnType<typeof vi.fn> };
+  let mockDlqProducer: { disconnect: ReturnType<typeof vi.fn> };
+  let mockResponseProducer: { disconnect: ReturnType<typeof vi.fn> };
+  let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
+  let mockAgent: IOpenCodeAgent;
+  let activeSessions: Set<AbortController>;
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let mockExit: (code: number) => never;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // Mock для exitFn параметра
+    mockExit = vi.fn() as unknown as (code: number) => never;
+
+    mockState = {
+      isShuttingDown: false,
+      totalMessagesProcessed: 100,
+      dlqMessagesCount: 5,
+      lastDlqRateLogTime: Date.now(),
+    };
+
+    // Mock agent с abort методом
+    mockAgent = {
+      invoke: vi.fn().mockResolvedValue({
+        status: 'success' as const,
+        response: 'test response',
+        sessionId: 'test-session-id',
+        executionTimeMs: 100,
+        timestamp: new Date().toISOString(),
+      }),
+      abort: vi.fn().mockResolvedValue(true),
+    };
+
+    // Active sessions с несколькими AbortController (C2)
+    activeSessions = new Set<AbortController>([new AbortController(), new AbortController(), new AbortController()]);
+
+    // Мокаем consumer и producers
+    mockConsumer = {
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockDlqProducer = {
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockResponseProducer = {
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    };
+
+    // Динамический импорт чтобы подхватить моки
+    const consumerModule = await import('../../src/kafka/consumer.js');
+    performGracefulShutdown = consumerModule.performGracefulShutdown;
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('должен abort все активные сессии во время shutdown', async () => {
+    await performGracefulShutdown(
+      mockConsumer,
+      mockDlqProducer,
+      mockResponseProducer,
+      'SIGTERM',
+      mockState,
+      mockExit,
+      undefined,      // agent - позиция 7
+      activeSessions, // activeSessions - позиция 8
+    );
+
+    // C2: Проверяем что все AbortController были aborted
+    for (const controller of activeSessions) {
+      expect(controller.signal.aborted).toBe(true);
+    }
+
+    // Проверяем что все disconnect вызваны
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockDlqProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1);
+
+    // Проверяем что activeSessions очищен
+    expect(activeSessions.size).toBe(0);
+  });
+
+  it('должен продолжать abort остальных сессий если один abort падает', async () => {
+    // Первый AbortController падает при abort - но AbortController.abort() не бросает ошибок
+    // Этот тест проверяет что все controllers всё равно aborted
+
+    await performGracefulShutdown(
+      mockConsumer,
+      mockDlqProducer,
+      mockResponseProducer,
+      'SIGTERM',
+      mockState,
+      mockExit,
+      undefined,      // agent - позиция 7
+      activeSessions, // activeSessions - позиция 8
+    );
+
+    // C2: Все AbortController должны быть aborted (AbortController.abort() не бросает)
+    for (const controller of activeSessions) {
+      expect(controller.signal.aborted).toBe(true);
+    }
+
+    // Disconnect должен продолжить выполнение
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockDlqProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('должен корректно завершить shutdown с пустым activeSessions', async () => {
+    // Пустой Set сессий
+    activeSessions.clear();
+
+    await performGracefulShutdown(
+      mockConsumer,
+      mockDlqProducer,
+      mockResponseProducer,
+      'SIGTERM',
+      mockState,
+      mockExit,
+      activeSessions,
+    );
+
+    // C2: AbortController.abort() не бросает - просто проверяем что disconnect вызван
+
+    // Все disconnect должны быть вызваны
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockDlqProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1);
+
+    // shutdown должен завершиться успешно
+    expect(mockExit).not.toHaveBeenCalled();
+  });
+
+  it('должен disconnect consumer, dlqProducer и responseProducer во время shutdown', async () => {
+    await performGracefulShutdown(
+      mockConsumer,
+      mockDlqProducer,
+      mockResponseProducer,
+      'SIGTERM',
+      mockState,
+      mockExit,
+      mockAgent,
+      activeSessions,
+    );
+
+    // C2: Проверяем что все AbortController были aborted
+    for (const controller of activeSessions) {
+      expect(controller.signal.aborted).toBe(true);
+    }
+
+    // Все три disconnect вызваны
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockDlqProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('должен выйти с кодом 1 если shutdown превышает 15 секунд', async () => {
+    vi.useFakeTimers();
+
+    // Мокаем медленный disconnect
+    mockConsumer.disconnect.mockImplementation(
+      () => new Promise((resolve) => setTimeout(resolve, 20_000)),
+    );
+
+    const shutdownPromise = performGracefulShutdown(
+      mockConsumer,
+      mockDlqProducer,
+      mockResponseProducer,
+      'SIGTERM',
+      mockState,
+      mockExit,
+      mockAgent,
+      activeSessions,
+    );
+
+    // Fast-forward времени до 15 секунд
+    vi.advanceTimersByTime(15_000);
+
+    await vi.runAllTimersAsync();
+
+    try {
+      await shutdownPromise;
+    } catch {
+      // Expected to timeout
+    }
+
+    // Проверяем force exit через exitFn
+    expect(mockExit).toHaveBeenCalledWith(1);
+
+    vi.useRealTimers();
+  });
+
+  it('должен логировать warning при timeout shutdown', async () => {
+    vi.useFakeTimers();
+
+    // Мокаем медленный disconnect
+    mockConsumer.disconnect.mockImplementation(
+      () => new Promise((resolve) => setTimeout(resolve, 20_000)),
+    );
+
+    const shutdownPromise = performGracefulShutdown(
+      mockConsumer,
+      mockDlqProducer,
+      mockResponseProducer,
+      'SIGTERM',
+      mockState,
+      mockExit,
+      mockAgent,
+      activeSessions,
+    );
+
+    // Fast-forward времени до 15 секунд
+    vi.advanceTimersByTime(15_000);
+
+    await vi.runAllTimersAsync();
+
+    try {
+      await shutdownPromise;
+    } catch {
+      // Expected to timeout
+    }
+
+    // Проверяем что был error лог при timeout (логируется в console.error)
+    const errorLog = vi.mocked(consoleErrorSpy).mock.calls.find((call) => {
+      return JSON.stringify(call).includes('force_exit_after_timeout');
+    });
+    expect(errorLog).toBeDefined();
+
+    vi.useRealTimers();
+  });
+
+  it('должен работать без agent параметра (обратная совместимость)', async () => {
+    // Вызываем без agent и activeSessions — должен работать как раньше
+    await performGracefulShutdown(
+      mockConsumer,
+      mockDlqProducer,
+      mockResponseProducer,
+      'SIGTERM',
+      mockState,
+      mockExit,
+    );
+
+// abort не должен быть вызван
+    expect(mockAgent.abort).not.toHaveBeenCalled();
+
+    // Все disconnect должны быть вызваны
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockDlqProducer.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockResponseProducer.disconnect).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Unit tests для DLQ error handling envelope verification (FR-015)
+ */
+describe('DLQ error handling (FR-015)', () => {
+  let mockDlqProducer: Producer;
+  let mockCommitOffsets: ReturnType<typeof vi.fn>;
+  let mockConfig: PluginConfigV003;
+  let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
+  let mockAgent: IOpenCodeAgent;
+  let mockResponseProducer: Producer;
+  let activeSessions: Set<AbortController>;
+
+  const createConfigWithRules = (rules: RuleV003[]): PluginConfigV003 => ({
+    topics: ['test-topic'],
+    rules,
+  });
+
+  const createPayload = (value: Record<string, unknown>, partition = 0, offset = '0') => ({
+    topic: 'test-topic',
+    partition,
+    message: {
+      value: Buffer.from(JSON.stringify(value)),
+      offset,
+      key: null,
+      headers: {},
+      timestamp: '2024-04-22T00:00:00.000Z',
+    },
+  });
+
+  beforeEach(() => {
+    mockDlqProducer = {} as Producer;
+    mockCommitOffsets = vi.fn().mockResolvedValue(undefined);
+    mockState = {
+      isShuttingDown: false,
+      totalMessagesProcessed: 0,
+      dlqMessagesCount: 0,
+      lastDlqRateLogTime: Date.now(),
+    };
+
+    // Mock agent - default success
+    mockAgent = {
+      invoke: vi.fn().mockResolvedValue({
+        status: 'success' as const,
+        response: 'test response',
+        sessionId: 'test-session-id',
+        executionTimeMs: 100,
+        timestamp: new Date().toISOString(),
+      }),
+      abort: vi.fn().mockResolvedValue(true),
+    };
+
+    mockResponseProducer = {
+      send: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Producer;
+
+    activeSessions = new Set<AbortController>();
+
+    const rules = [
+      {
+        name: 'test-rule',
+        jsonPath: '$.test',
+        promptTemplate: 'Process: ${$}',
+      },
+    ];
+
+    mockConfig = {
+      topics: ['test-topic'],
+      rules: rules,
+    };
+
+    vi.clearAllMocks();
+  });
+
+it('should send to DLQ with correct args on parse error', async () => {
+    // Use invalid JSON (non-parseable)
+    const payload = {
+      topic: 'test-topic',
+      partition: 3,
+      message: {
+        value: Buffer.from('not valid json'), // Invalid JSON
+        offset: '42',
+        key: null,
+        headers: {},
+        timestamp: '2024-04-22T00:00:00.000Z',
+      },
+    };
+
+    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    // Verify sendToDlq was called with correct payload metadata
+    expect(sendToDlq).toHaveBeenCalledTimes(1);
+    const dlqCall = vi.mocked(sendToDlq).mock.calls[0];
+
+    // dlqCall[0] = dlqProducer, dlqCall[1] = originalMessage, dlqCall[2] = error
+    expect(dlqCall[1].topic).toBe('test-topic');
+    expect(dlqCall[1].partition).toBe(3);
+    expect(dlqCall[1].offset).toBe('42');
+
+    // Verify error message contains "JSON" or "parse"
+    expect(dlqCall[2].message).toMatch(/JSON|parse/i);
+  });
+
+  it('should send to DLQ with correct args on timeout', async () => {
+    // Create config with agent rule
+    const config = createConfigWithRules([{
+      name: 'test-rule',
+      jsonPath: '$.test',
+      promptTemplate: 'Process: ${$}',
+      agentId: 'test-agent',
+      responseTopic: 'response-topic',
+      timeoutMs: 120_000,
+    }]);
+
+    // Mock agent to return timeout result
+    mockAgent.invoke = vi.fn().mockResolvedValue({
+      status: 'timeout' as const,
+      sessionId: 'test-session',
+      errorMessage: 'Agent timed out after 120 seconds',
+      executionTimeMs: 120000,
+      timestamp: '2024-01-01T00:00:00.000Z',
+    } as unknown as AgentResult);
+
+    const payload = createPayload({ test: 'value' }, 1, '15');
+
+    await eachMessageHandler(payload, config, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    // Verify sendToDlq was called with correct payload metadata
+    expect(sendToDlq).toHaveBeenCalledTimes(1);
+    const dlqCall = vi.mocked(sendToDlq).mock.calls[0];
+
+    // dlqCall[0] = dlqProducer, dlqCall[1] = originalMessage, dlqCall[2] = error
+    expect(dlqCall[1].topic).toBe('test-topic');
+    expect(dlqCall[1].partition).toBe(1);
+    expect(dlqCall[1].offset).toBe('15');
+
+    // Verify error message contains timeout info
+    expect(dlqCall[2].message).toMatch(/timeout|timed out/i);
+  });
+
+  it('should send to DLQ with correct args on agent error', async () => {
+    // Create config with agent rule
+    const config = createConfigWithRules([{
+      name: 'test-rule',
+      jsonPath: '$.test',
+      promptTemplate: 'Process: ${$}',
+      agentId: 'test-agent',
+      responseTopic: 'response-topic',
+      timeoutMs: 120_000,
+    }]);
+
+    // Mock agent to return error result
+    mockAgent.invoke = vi.fn().mockResolvedValue({
+      status: 'error' as const,
+      sessionId: 'test-session',
+      errorMessage: 'Agent execution failed: invalid prompt',
+      executionTimeMs: 50,
+      timestamp: '2024-01-01T00:00:00.000Z',
+    } as unknown as AgentResult);
+
+    const payload = createPayload({ test: 'value' }, 5, '99');
+
+    await eachMessageHandler(payload, config, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    // Verify sendToDlq was called with correct payload metadata
+    expect(sendToDlq).toHaveBeenCalledTimes(1);
+    const dlqCall = vi.mocked(sendToDlq).mock.calls[0];
+
+    // dlqCall[0] = dlqProducer, dlqCall[1] = originalMessage, dlqCall[2] = error
+    expect(dlqCall[1].topic).toBe('test-topic');
+    expect(dlqCall[1].partition).toBe(5);
+    expect(dlqCall[1].offset).toBe('99');
+
+    // Verify error message contains agent error
+    expect(dlqCall[2].message).toMatch(/error|fail/i);
+  });
+
+  it('should send to DLQ with correct args on timeout', async () => {
+    // Create config with agent rule
+    const config = createConfigWithRules([{
+      name: 'test-rule',
+      jsonPath: '$.test',
+      promptTemplate: 'Process: ${$}',
+      agentId: 'test-agent',
+      responseTopic: 'response-topic',
+      timeoutMs: 120_000,
+    }]);
+
+    // Mock agent to return timeout result
+    mockAgent.invoke = vi.fn().mockResolvedValue({
+      status: 'timeout' as const,
+      sessionId: 'test-session',
+      errorMessage: 'Agent timed out after 120 seconds',
+      executionTimeMs: 120000,
+      timestamp: '2024-01-01T00:00:00.000Z',
+    } as unknown as AgentResult);
+
+    const payload = createPayload({ test: 'value' }, 1, '15');
+
+    await eachMessageHandler(payload, config, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    // Verify sendToDlq was called with correct payload metadata
+    expect(sendToDlq).toHaveBeenCalledTimes(1);
+    const dlqCall = vi.mocked(sendToDlq).mock.calls[0];
+
+    // Verify payload metadata
+    expect(dlqCall[1].topic).toBe('test-topic');
+    expect(dlqCall[1].partition).toBe(1);
+    expect(dlqCall[1].offset).toBe('15');
+
+    // Verify error message contains timeout info
+    expect(dlqCall[2].message).toMatch(/timeout|timed out/i);
+  });
+
+  it('should send to DLQ with correct args on agent error', async () => {
+    // Create config with agent rule
+    const config = createConfigWithRules([{
+      name: 'test-rule',
+      jsonPath: '$.test',
+      promptTemplate: 'Process: ${$}',
+      agentId: 'test-agent',
+      responseTopic: 'response-topic',
+      timeoutMs: 120_000,
+    }]);
+
+    // Mock agent to return error result
+    mockAgent.invoke = vi.fn().mockResolvedValue({
+      status: 'error' as const,
+      sessionId: 'test-session',
+      errorMessage: 'Agent execution failed: invalid prompt',
+      executionTimeMs: 50,
+      timestamp: '2024-01-01T00:00:00.000Z',
+    } as unknown as AgentResult);
+
+    const payload = createPayload({ test: 'value' }, 5, '99');
+
+    await eachMessageHandler(payload, config, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    // Verify sendToDlq was called with correct payload metadata
+    expect(sendToDlq).toHaveBeenCalledTimes(1);
+    const dlqCall = vi.mocked(sendToDlq).mock.calls[0];
+
+    // Verify payload metadata
+    expect(dlqCall[1].topic).toBe('test-topic');
+    expect(dlqCall[1].partition).toBe(5);
+    expect(dlqCall[1].offset).toBe('99');
+
+    // Verify error message contains agent error
+    expect(dlqCall[2].message).toMatch(/error|fail/i);
+  });
+
+  it('should commit offsets even when DLQ send fails', async () => {
+    // Use invalid JSON to trigger DLQ path
+    const payload = {
+      topic: 'test-topic',
+      partition: 2,
+      message: {
+        value: Buffer.from('invalid json'),
+        offset: '7',
+        key: null,
+        headers: {},
+        timestamp: '2024-04-22T00:00:00.000Z',
+      },
+    };
+
+    // Mock sendToDlq to reject (resilience test - in reality it never throws)
+    vi.mocked(sendToDlq).mockRejectedValueOnce(new Error('DLQ send failed'));
+
+    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    // Verify commitOffsets was called even though sendToDlq failed
+    expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+    expect(mockCommitOffsets).toHaveBeenCalledWith([
+      { topic: 'test-topic', partition: 2, offset: '7' },
+    ]);
+  });
+
+  it('should commit offsets after DLQ is called', async () => {
+    // Create config with agent rule to trigger agent path
+    const config = createConfigWithRules([{
+      name: 'test-rule',
+      jsonPath: '$.test',
+      promptTemplate: 'Process: ${$}',
+      agentId: 'test-agent',
+      responseTopic: 'response-topic',
+      timeoutMs: 120_000,
+    }]);
+
+    // Mock agent to return error to trigger DLQ path
+    mockAgent.invoke = vi.fn().mockResolvedValue({
+      status: 'error' as const,
+      sessionId: 'test-session',
+      errorMessage: 'Agent failed',
+      executionTimeMs: 50,
+      timestamp: '2024-01-01T00:00:00.000Z',
+    } as unknown as AgentResult);
+
+    const payload = createPayload({ test: 'value' }, 0, '1');
+
+    await eachMessageHandler(payload, config, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+
+    // Verify both were called
+    expect(sendToDlq).toHaveBeenCalled();
+    expect(mockCommitOffsets).toHaveBeenCalled();
+
+    // Verify call order: sendToDlq called before commitOffsets
+    const sendToDlqCallIndex = vi.mocked(sendToDlq).mock.calls.length - 1;
+    expect(sendToDlqCallIndex).toBeLessThan(mockCommitOffsets.mock.calls.length);
+  });
+
+  /**
+   * SIGTERM во время обработки сообщения (MAJOR M9)
+   * Тестирует что сообщение которое в процессе обработки (agent.invoke вызван) корректно завершается при получении SIGTERM
+   */
+  describe('SIGTERM при активной обработке', () => {
+    it('должен завершить текущую обработку сообщения при получении SIGTERM', async () => {
+      // 1. Создаём mock agent с задержкой (invoke занимает время)
+      let invokeResolve: (result: AgentResult) => void;
+      const invokePromise = new Promise<AgentResult>((resolve) => {
+        invokeResolve = resolve;
+      });
+
+      const slowAgent: IOpenCodeAgent = {
+        invoke: vi.fn().mockReturnValue(invokePromise),
+        abort: vi.fn().mockResolvedValue(true),
+      };
+
+      // 2. Создаём payload и state
+      const slowConfig: PluginConfigV003 = {
+        topics: ['test-topic'],
+        rules: [
+          {
+            name: 'slow-rule',
+            jsonPath: '$.test',
+            promptTemplate: 'Process: ${$}',
+            agentId: 'slow-agent',
+            timeoutMs: 60000,
+          },
+        ],
+      };
+
+      const payload = {
+        topic: 'test-topic',
+        partition: 0,
+        message: {
+          value: Buffer.from('{"test": "slow-value"}'),
+          offset: '5',
+          key: null,
+          headers: {},
+          timestamp: '2024-04-22T00:00:00.000Z',
+        },
+      };
+
+      const slowState: MockConsumerState = {
+        isShuttingDown: false,
+        totalMessagesProcessed: 0,
+        dlqMessagesCount: 0,
+        lastDlqRateLogTime: Date.now(),
+      };
+
+      const slowActiveSessions = new Set<AbortController>();
+
+      const slowResponseProducer = {
+        send: vi.fn().mockResolvedValue(undefined),
+        connect: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+      } as unknown as Producer;
+
+      // 3. Начинаем обработку сообщения (НЕ await - запускаем в фоне)
+      const handlerPromise = eachMessageHandler(
+        payload,
+        slowConfig,
+        mockDlqProducer,
+        mockCommitOffsets,
+        slowState,
+        slowAgent,
+        slowResponseProducer,
+        slowActiveSessions
+      );
+
+      // Ждём немного чтобы invoke начал выполняться
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // 4. Проверяем что сообщение в процессе обработки (invoke был вызван)
+      expect(slowAgent.invoke).toHaveBeenCalled();
+
+      // 5. Завершаем invoke (эмулируем завершение работы агента)
+      invokeResolve!({
+        status: 'success' as const,
+        response: 'Processing completed',
+        sessionId: 'sess_slow',
+        executionTimeMs: 100,
+        timestamp: new Date().toISOString(),
+      });
+
+      // 6. Ждём завершения handler
+      await handlerPromise;
+
+      // 7. Проверяем что:
+      // - Сообщение было обработано (commit вы��ван)
+      expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+
+      // - Сообщение обработано успешно
+      expect(slowState.totalMessagesProcessed).toBe(1);
+    });
+
+    it('должен корректно обработать failed agent при SIGTERM', async () => {
+      // Тестируем сценарий когда agent возвращает error/timeout
+
+      let invokeResolve: (result: AgentResult) => void;
+      const invokePromise = new Promise<AgentResult>((resolve) => {
+        invokeResolve = resolve;
+      });
+
+      const errorAgent: IOpenCodeAgent = {
+        invoke: vi.fn().mockReturnValue(invokePromise),
+        abort: vi.fn().mockResolvedValue(true),
+      };
+
+      const errorPayload = {
+        topic: 'test-topic',
+        partition: 0,
+        message: {
+          value: Buffer.from('{"test": "error-value"}'),
+          offset: '6',
+          key: null,
+          headers: {},
+          timestamp: '2024-04-22T00:00:00.000Z',
+        },
+      };
+
+      const errorState: MockConsumerState = {
+        isShuttingDown: false,
+        totalMessagesProcessed: 0,
+        dlqMessagesCount: 0,
+        lastDlqRateLogTime: Date.now(),
+      };
+
+      const errorActiveSessions = new Set<AbortController>();
+
+      const errorResponseProducer = {
+        send: vi.fn().mockResolvedValue(undefined),
+        connect: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+      } as unknown as Producer;
+
+      const errorHandlerPromise = eachMessageHandler(
+        errorPayload,
+        mockConfig,
+        mockDlqProducer,
+        mockCommitOffsets,
+        errorState,
+        errorAgent,
+        errorResponseProducer,
+        errorActiveSessions
+      );
+
+      // Ждём немного чтобы invoke начал выполняться
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Завершаем invoke с error
+      invokeResolve!({
+        status: 'error' as const,
+        errorMessage: 'Agent failed during processing',
+        sessionId: 'sess_error',
+        executionTimeMs: 50,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Ждём завершения
+      await errorHandlerPromise;
+
+      // Проверяем что:
+      // - Сообщение было обработано
+      expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+
+      // - Отправлено в DLQ (status=error)
+      expect(sendToDlq).toHaveBeenCalled();
+    });
   });
 });

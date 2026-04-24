@@ -14,6 +14,7 @@ import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vites
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
 import type { PluginConfigV003 } from '../../src/schemas/index.js';
 import type { Producer } from 'kafkajs';
+import type { IOpenCodeAgent } from '../../src/opencode/IOpenCodeAgent.js';
 
 // Import setup functions (могут быть использованы для будущих реальных integration tests)
 import { createRedpandaContainer, cleanupRedpandaContainer } from './setup';
@@ -559,6 +560,147 @@ describe('Integration Tests: DLQ Flow', () => {
         return JSON.stringify(call).includes('dlq_sent');
       });
       expect(logCall).toBeDefined();
+    });
+  });
+
+  /**
+   * Agent Error/Timeout сценарии (MAJOR M8)
+   */
+  describe('Agent Error → DLQ', () => {
+    let mockAgent: IOpenCodeAgent;
+    let mockResponseProducer: Producer;
+    let activeSessions: Set<AbortController>;
+
+    beforeEach(() => {
+      // Mock agent с ошибкой
+      mockAgent = {
+        invoke: vi.fn().mockResolvedValue({
+          status: 'error' as const,
+          errorMessage: 'Agent processing failed',
+          sessionId: 'sess_error',
+          executionTimeMs: 100,
+          timestamp: new Date().toISOString(),
+        }),
+        abort: vi.fn().mockResolvedValue(true),
+      };
+
+      // Mock response producer
+      mockResponseProducer = {
+        send: vi.fn().mockResolvedValue(undefined),
+        connect: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+      } as unknown as Producer;
+
+      activeSessions = new Set<AbortController>();
+    });
+
+    it('отправляет сообщение в DLQ когда агент возвращает status=error', async () => {
+      const payload = {
+        topic: 'test-topic',
+        partition: 0,
+        message: {
+          value: Buffer.from('{"test": "value"}'),
+          offset: '42',
+          key: null,
+          headers: {},
+          timestamp: '2024-04-22T00:00:00.000Z',
+        },
+      };
+
+      await eachMessageHandler(
+        payload,
+        mockConfig,
+        mockDlqProducer,
+        mockCommitOffsets,
+        mockState,
+        mockAgent,
+        mockResponseProducer,
+        activeSessions
+      );
+
+      // Проверяем что sendToDlq вызван
+      expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
+
+      // Получаем отправленный envelope
+      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      const record = sendCall[0];
+      const envelope = JSON.parse(record.messages[0].value as string);
+
+      // Проверяем что errorMessage содержит текст ошибки агента
+      expect(envelope.errorMessage).toContain('Agent processing failed');
+      expect(envelope.errorMessage).toContain('error');
+
+      // Проверяем что commitOffsets вызван
+      expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Agent Timeout → DLQ', () => {
+    let mockAgent: IOpenCodeAgent;
+    let mockResponseProducer: Producer;
+    let activeSessions: Set<AbortController>;
+
+    beforeEach(() => {
+      // Mock agent с timeout
+      mockAgent = {
+        invoke: vi.fn().mockResolvedValue({
+          status: 'timeout' as const,
+          errorMessage: 'Agent timed out after 120000ms',
+          sessionId: 'sess_timeout',
+          executionTimeMs: 120000,
+          timestamp: new Date().toISOString(),
+        }),
+        abort: vi.fn().mockResolvedValue(true),
+      };
+
+      // Mock response producer
+      mockResponseProducer = {
+        send: vi.fn().mockResolvedValue(undefined),
+        connect: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined),
+      } as unknown as Producer;
+
+      activeSessions = new Set<AbortController>();
+    });
+
+    it('отправляет сообщение в DLQ когда агент возвращает status=timeout', async () => {
+      const payload = {
+        topic: 'test-topic',
+        partition: 0,
+        message: {
+          value: Buffer.from('{"test": "value"}'),
+          offset: '42',
+          key: null,
+          headers: {},
+          timestamp: '2024-04-22T00:00:00.000Z',
+        },
+      };
+
+      await eachMessageHandler(
+        payload,
+        mockConfig,
+        mockDlqProducer,
+        mockCommitOffsets,
+        mockState,
+        mockAgent,
+        mockResponseProducer,
+        activeSessions
+      );
+
+      // Проверяем что sendToDlq вызван
+      expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
+
+      // Получаем отправленный envelope
+      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      const record = sendCall[0];
+      const envelope = JSON.parse(record.messages[0].value as string);
+
+      // Проверяем что errorMessage указывает на timeout
+      expect(envelope.errorMessage).toContain('timeout');
+      expect(envelope.errorMessage).toContain('120000');
+
+      // Проверяем что commitOffsets вызван
+      expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
     });
   });
 });

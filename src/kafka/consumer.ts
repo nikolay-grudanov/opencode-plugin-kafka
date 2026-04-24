@@ -7,13 +7,14 @@
  *
  * @see https://kafka.js.org/docs/consuming#a-name-getting-the-message-a-message
  */
-
 import type { PluginConfigV003 } from '../schemas/index.js';
 import type { Producer, Consumer, EachMessagePayload } from 'kafkajs';
 import { matchRuleV003 } from '../core/routing.js';
 import { buildPromptV003 } from '../core/prompt.js';
 import { sendToDlq } from './dlq.js';
-import { createKafkaClient, createConsumer, createDlqProducer } from './client.js';
+import { createKafkaClient, createConsumer, createDlqProducer, createResponseProducer } from './client.js';
+import { sendResponse } from './response-producer.js';
+import type { IOpenCodeAgent, AgentResult } from '../opencode/IOpenCodeAgent.js';
 
 /**
  * Максимальный размер сообщения (1MB по умолчанию для KafkaJS).
@@ -222,7 +223,8 @@ export async function executeWithThrottleRetry<T>(
  *         validates message size (max 1MB, oversized → DLQ);
  *         calls matchRuleV003() (throws → DLQ);
  *         calls buildPromptV003() (throws → DLQ);
- *         logs matched rule name and prompt;
+ *         invokes OpenCode agent (errors → DLQ);
+ *         sends response to responseTopic (success flow);
  *         commits offset on success;
  *         autoCommit: false — manual commitOffsets() after each message
  *
@@ -236,6 +238,9 @@ export async function executeWithThrottleRetry<T>(
  * @param dlqProducer - Producer для отправки в DLQ
  * @param commitOffsets - Функция для commit offsets из KafkaJS consumer
  * @param state - Состояние consumer (Constitution Principle IV: No-State Consumer)
+ * @param agent - OpenCode agent для обработки сообщений
+ * @param responseProducer - Producer для отправки ответов агентам
+ * @param activeSessions - Set для отслеживания активных сессий (Set<AbortController>)
  * @returns Promise<void>
  *
  * @example
@@ -245,7 +250,10 @@ export async function executeWithThrottleRetry<T>(
  *   config,
  *   dlqProducer,
  *   consumer.commitOffsets.bind(consumer),
- *   state
+ *   state,
+ *   agent,
+ *   responseProducer,
+ *   activeSessions
  * );
  * ```
  */
@@ -255,6 +263,9 @@ export async function eachMessageHandler(
   dlqProducer: Producer,
   commitOffsets: CommitOffsetsFn,
   state: ConsumerState,
+  agent: IOpenCodeAgent,
+  responseProducer: Producer,
+  activeSessions: Set<AbortController>,
 ): Promise<void> {
   // Проверяем состояние shutdown — если shutdown в процессе, не обрабатываем новые сообщения
   if (state.isShuttingDown) {
@@ -304,6 +315,7 @@ export async function eachMessageHandler(
         topic: payload.topic,
         partition: payload.partition,
         offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
       }, error);
       state.dlqMessagesCount++;
       logDlqRate(state);
@@ -320,6 +332,7 @@ export async function eachMessageHandler(
         topic: payload.topic,
         partition: payload.partition,
         offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
       }, error);
       state.dlqMessagesCount++;
       logDlqRate(state);
@@ -338,6 +351,7 @@ export async function eachMessageHandler(
         topic: payload.topic,
         partition: payload.partition,
         offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
       }, error);
       state.dlqMessagesCount++;
       logDlqRate(state);
@@ -356,6 +370,7 @@ export async function eachMessageHandler(
         topic: payload.topic,
         partition: payload.partition,
         offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
       }, error);
       state.dlqMessagesCount++;
       logDlqRate(state);
@@ -399,10 +414,79 @@ export async function eachMessageHandler(
       }),
     );
 
-    // Логируем DLQ rate после успешной обработки
-    logDlqRate(state);
+    // 7. Вызываем OpenCode агента (C2: AbortController для реальной отмены)
+    const abortController = new AbortController();
+    activeSessions.add(abortController);
 
-    // 7. Commit offset on success с throttle retry
+    let agentResult: AgentResult;
+    try {
+      agentResult = await agent.invoke(prompt, matchedRule.agentId, {
+        timeoutMs: matchedRule.timeoutMs ?? 120_000,
+        signal: abortController.signal,
+      });
+    } finally {
+      activeSessions.delete(abortController); // гарантированная очистка во всех путях
+    }
+
+    // 8. Обрабатываем результат агента — отправляем response или DLQ
+    const sessionId = agentResult.sessionId;
+
+    if (agentResult.status === 'success') {
+      // Отправляем response если правило имеет responseTopic
+      if (matchedRule.responseTopic) {
+        await sendResponse(responseProducer, matchedRule.responseTopic, {
+          messageKey: sessionId,
+          sessionId,
+          ruleName: matchedRule.name,
+          agentId: matchedRule.agentId,
+          response: agentResult.response ?? '',
+          status: 'success',
+          executionTimeMs: agentResult.executionTimeMs,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      // Логируем успешное выполнение
+      console.log(
+        JSON.stringify({
+          level: 'info',
+          event: 'agent_invoke_success',
+          sessionId,
+          ruleName: matchedRule.name,
+          agentId: matchedRule.agentId,
+          executionTimeMs: agentResult.executionTimeMs,
+          timestamp: new Date().toISOString(),
+        }),
+      );
+    } else {
+      // Агент вернул ошибку или timeout → отправляем в DLQ
+      const errorReason = agentResult.status === 'timeout' ? 'Agent timeout' : 'Agent error';
+      const errorMsg = agentResult.errorMessage ?? errorReason;
+      const error = new Error(`Agent invoke failed: ${errorMsg} (status: ${agentResult.status})`);
+      await sendToDlq(dlqProducer, {
+        value: messageValue.toString('utf-8'),
+        topic: payload.topic,
+        partition: payload.partition,
+        offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
+      }, error);
+      state.dlqMessagesCount++;
+
+      console.error(
+        JSON.stringify({
+          level: 'error',
+          event: 'agent_invoke_failed',
+          sessionId,
+          ruleName: matchedRule.name,
+          agentId: matchedRule.agentId,
+          agentStatus: agentResult.status,
+          errorMessage: errorMsg,
+          timestamp: new Date().toISOString(),
+        }),
+      );
+    }
+
+    // 9. Commit offset on success с throttle retry
+    logDlqRate(state);
     await executeWithThrottleRetry(
       () => commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]),
       'commitOffsets',
@@ -417,6 +501,7 @@ export async function eachMessageHandler(
       topic: payload.topic,
       partition: payload.partition,
       offset: payload.message.offset,
+      originalKey: payload.message.key?.toString() ?? null,
     }, dlqError);
 
     state.dlqMessagesCount++;
@@ -430,35 +515,44 @@ export async function eachMessageHandler(
 }
 
 /**
- * Выполняет graceful shutdown для consumer и producer.
+ * Выполняет graceful shutdown для consumer и producers.
  *
- * SIGTERM/SIGINT → consumer.disconnect() → producer.disconnect().
+ * SIGTERM/SIGINT → abort all active sessions → consumer.disconnect() → dlqProducer.disconnect() → responseProducer.disconnect().
  * Single timeout: 15 секунд для всего процесса shutdown (force-kill after timeout) (SC-008).
  * SIGTERM во время DLQ send: завершается отправка, затем disconnect.
  * Последовательность логируется.
  *
- * FR-026: SIGTERM/SIGINT → consumer.disconnect() → producer.disconnect();
+ * FR-016: abort all active sessions via agent.abort() using Promise.allSettled()
+ * FR-026: SIGTERM/SIGINT → consumer.disconnect() → dlqProducer.disconnect() → responseProducer.disconnect();
  *         Single timeout: 15 seconds (force-kill after timeout) (SC-008);
  *         SIGTERM during DLQ send: complete it, then disconnect;
  *         Sequence logged
  *
  * @param consumer - Kafka consumer для отключения
- * @param producer - Kafka producer для отключения
+ * @param dlqProducer - Kafka DLQ producer для отключения
+ * @param responseProducer - Kafka response producer для отключения
  * @param signal - Сигнал shutdown ('SIGTERM' или 'SIGINT')
  * @param state - Состояние consumer (Constitution Principle IV: No-State Consumer)
+ * @param exitFn - Функция для выхода из процесса (по умолчанию process.exit)
+ * @param agent - OpenCode agent для abort активных сессий (опционально)
+ * @param activeSessions - Set активных сессий для abort (C2: Set<AbortController>, опционально)
  * @returns Promise<void>
  *
  * @example
  * ```ts
- * await performGracefulShutdown(consumer, dlqProducer, 'SIGTERM', state);
+ * await performGracefulShutdown(consumer, dlqProducer, responseProducer, 'SIGTERM', state, undefined, agent, activeSessions);
  * ```
  */
 export async function performGracefulShutdown(
   consumer: Consumer,
-  producer: Producer,
+  dlqProducer: Producer,
+  responseProducer: Producer,
   signal: string,
   state: ConsumerState,
   exitFn: (code: number) => never = process.exit as (code: number) => never,
+  // зарезервировано для будущего использования; отмена через AbortController
+  _agent?: IOpenCodeAgent,
+  activeSessions?: Set<AbortController>,
 ): Promise<void> {
   // Защита от повторных вызовов
   if (state.isShuttingDown) {
@@ -489,6 +583,49 @@ export async function performGracefulShutdown(
   try {
     // Создаем Promise для graceful shutdown с timeout
     const shutdownPromise = (async () => {
+      // 0. Abort all active sessions via AbortController.abort() (C2: заменяет agent.abort())
+      if (activeSessions && activeSessions.size > 0) {
+        console.log(
+          JSON.stringify({
+            level: 'info',
+            event: 'aborting_active_sessions',
+            sessionCount: activeSessions.size,
+            timestamp: new Date().toISOString(),
+          }),
+        );
+
+        // C2: Вызываем abort() на каждом AbortController
+        let abortedCount = 0;
+        for (const controller of activeSessions) {
+          try {
+            controller.abort();
+            abortedCount++;
+          } catch (abortError) {
+            console.warn(
+              JSON.stringify({
+                level: 'warn',
+                event: 'session_abort_failed',
+                error: abortError instanceof Error ? abortError.message : String(abortError),
+                timestamp: new Date().toISOString(),
+              }),
+            );
+          }
+        }
+
+        console.log(
+          JSON.stringify({
+            level: 'info',
+            event: 'sessions_aborted',
+            totalSessions: activeSessions.size,
+            abortedCount,
+            timestamp: new Date().toISOString(),
+          }),
+        );
+
+        // Очищаем activeSessions после abort
+        activeSessions.clear();
+      }
+
       try {
         // 1. Disconnect consumer
         console.log(
@@ -521,34 +658,65 @@ export async function performGracefulShutdown(
       }
 
       try {
-        // 2. Disconnect producer
+        // 2. Disconnect DLQ producer
         console.log(
           JSON.stringify({
             level: 'info',
-            event: 'producer_disconnect_started',
+            event: 'dlq_producer_disconnect_started',
             timestamp: new Date().toISOString(),
           }),
         );
 
-        await producer.disconnect();
+        await dlqProducer.disconnect();
 
         console.log(
           JSON.stringify({
             level: 'info',
-            event: 'producer_disconnect_completed',
+            event: 'dlq_producer_disconnect_completed',
             timestamp: new Date().toISOString(),
           }),
         );
-      } catch (producerError) {
+      } catch (dlqProducerError) {
         console.error(
           JSON.stringify({
             level: 'error',
-            event: 'producer_disconnect_failed',
-            error: producerError instanceof Error ? producerError.message : String(producerError),
+            event: 'dlq_producer_disconnect_failed',
+            error: dlqProducerError instanceof Error ? dlqProducerError.message : String(dlqProducerError),
             timestamp: new Date().toISOString(),
           }),
         );
-        // Продолжаем shutdown даже если producer.disconnect() не удался
+        // Продолжаем shutdown даже если dlqProducer.disconnect() не удался
+      }
+
+      try {
+        // 3. Disconnect response producer
+        console.log(
+          JSON.stringify({
+            level: 'info',
+            event: 'response_producer_disconnect_started',
+            timestamp: new Date().toISOString(),
+          }),
+        );
+
+        await responseProducer.disconnect();
+
+        console.log(
+          JSON.stringify({
+            level: 'info',
+            event: 'response_producer_disconnect_completed',
+            timestamp: new Date().toISOString(),
+          }),
+        );
+      } catch (responseProducerError) {
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            event: 'response_producer_disconnect_failed',
+            error: responseProducerError instanceof Error ? responseProducerError.message : String(responseProducerError),
+            timestamp: new Date().toISOString(),
+          }),
+        );
+        // Продолжаем shutdown даже если responseProducer.disconnect() не удался
       }
     })();
 
@@ -604,23 +772,27 @@ export async function performGracefulShutdown(
  * FR-024: wires FR-019..FR-023 together;
  *         Subscribes to all config.topics;
  *         Registers SIGTERM/SIGINT handlers;
- *         Orchestrates createKafkaClient → createConsumer → createDlqProducer → eachMessageHandler
+ *         Orchestrates createKafkaClient → createConsumer → createDlqProducer → createResponseProducer → eachMessageHandler
  *
- * FR-026: SIGTERM/SIGINT → consumer.disconnect() → producer.disconnect();
+ * FR-026: SIGTERM/SIGINT → consumer.disconnect() → dlqProducer.disconnect() → responseProducer.disconnect();
  *         Shutdown timeout: 15 seconds (force-kill after timeout) (SC-008);
  *         SIGTERM during DLQ send: complete it, then disconnect;
  *         Sequence logged
  *
  * @param config - Конфигурация плагина (PluginConfigV003)
+ * @param agent - OpenCode agent для обработки сообщений
  * @returns Promise<void> — resolves after successful consumer initialization;
  *         consumer continues running in background until SIGTERM/SIGINT
  *
  * @example
  * ```ts
- * await startConsumer(config);
+ * await startConsumer(config, agent);
  * ```
  */
-export async function startConsumer(config: PluginConfigV003): Promise<void> {
+export async function startConsumer(
+  config: PluginConfigV003,
+  agent: IOpenCodeAgent,
+): Promise<void> {
   console.log(
     JSON.stringify({
       level: 'info',
@@ -640,6 +812,9 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
   // 3. Создаем DLQ producer (FR-021)
   const dlqProducer = createDlqProducer(kafka);
 
+  // 3a. Создаем response producer для отправки ответов агентов (FR-022)
+  const responseProducer = createResponseProducer(kafka);
+
   // 4. Создаем состояние consumer (Constitution Principle IV: No-State Consumer)
   const state: ConsumerState = {
     isShuttingDown: false,
@@ -647,6 +822,9 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
     dlqMessagesCount: 0,
     lastDlqRateLogTime: Date.now(),
   };
+
+  // 4a. Создаем Set для отслеживания активных сессий агентов (C2: AbortController)
+  const activeSessions = new Set<AbortController>();
 
   try {
     // 5. Подключаем consumer и producer
@@ -664,6 +842,15 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
       JSON.stringify({
         level: 'info',
         event: 'dlq_producer_connected',
+        timestamp: new Date().toISOString(),
+      }),
+    );
+
+    await responseProducer.connect();
+    console.log(
+      JSON.stringify({
+        level: 'info',
+        event: 'response_producer_connected',
         timestamp: new Date().toISOString(),
       }),
     );
@@ -690,8 +877,17 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
         }),
       );
 
-      // Выполняем graceful shutdown
-      await performGracefulShutdown(consumer, dlqProducer, signal, state);
+      // Выполняем graceful shutdown с agent и activeSessions (FR-016)
+      await performGracefulShutdown(
+        consumer,
+        dlqProducer,
+        responseProducer,
+        signal,
+        state,
+        process.exit as (code: number) => never,
+        agent,
+        activeSessions,
+      );
 
       // Выходим из процесса после успешного shutdown
       process.exit(0);
@@ -715,7 +911,7 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
     consumer.run({
       autoCommit: false, // Required: manual offset commit via commitOffsets()
       eachMessage: async (payload: EachMessagePayload) => {
-        await eachMessageHandler(payload, config, dlqProducer, consumer.commitOffsets.bind(consumer), state);
+        await eachMessageHandler(payload, config, dlqProducer, consumer.commitOffsets.bind(consumer), state, agent, responseProducer, activeSessions);
       },
     }).catch((error) => {
       // Фатальная ошибка в run loop — пытаемся выполнить graceful shutdown
@@ -729,7 +925,16 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
       );
 
       // Выполняем graceful shutdown при ошибке
-      performGracefulShutdown(consumer, dlqProducer, 'ERROR', state).finally(() => process.exit(1));
+      performGracefulShutdown(
+        consumer,
+        dlqProducer,
+        responseProducer,
+        'ERROR',
+        state,
+        process.exit as (code: number) => never,
+        agent,
+        activeSessions,
+      ).finally(() => process.exit(1));
     });
 
     // startConsumer() возвращает здесь после успешной инициализации
@@ -746,8 +951,17 @@ export async function startConsumer(config: PluginConfigV003): Promise<void> {
       }),
     );
 
-    // Graceful shutdown даже в случае ошибки
-    await performGracefulShutdown(consumer, dlqProducer, 'ERROR', state);
+    // Graceful shutdown даже в случае ошибки (FR-016)
+    await performGracefulShutdown(
+      consumer,
+      dlqProducer,
+      responseProducer,
+      'ERROR',
+      state,
+      process.exit as (code: number) => never,
+      agent,
+      activeSessions,
+    );
 
     process.exit(1);
   }

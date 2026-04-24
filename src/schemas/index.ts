@@ -4,6 +4,7 @@
  * Contains schemas for two specifications:
  * - spec 002-core-refinements: RuleSchema, PluginConfigSchema (legacy, uses topic/agent)
  * - spec 003-kafka-consumer: kafkaEnvSchema, RuleV003Schema, PluginConfigV003Schema (current, uses jsonPath/promptTemplate)
+ * - spec 006-opencode-sdk-integration: RuleV003Schema (enhanced, uses agentId/responseTopic/timeoutMs/concurrency)
  */
 
 import { z } from 'zod';
@@ -104,6 +105,14 @@ export const RuleV003Schema = z.object({
   name: z.string().min(1, 'Rule name is required'),
   jsonPath: z.string().min(1, 'JSONPath expression is required'),
   promptTemplate: z.string().min(1, 'Prompt template is required'),
+  // ID OpenCode агента для вызова
+  agentId: z.string().min(1, 'Agent ID is required'),
+  // Топик для отправки ответа (optional)
+  responseTopic: z.string().min(1, 'Response topic name is required').optional(),
+  // Таймаут выполнения агента в миллисекундах (default: 120000 = 2 минуты)
+  timeoutMs: z.number().int().positive('Timeout must be positive').default(120_000),
+  // Максимальное количество параллельных вызовов (default: 1, v1 — sequential)
+  concurrency: z.number().int().min(1, 'Concurrency must be at least 1').max(10, 'Concurrency must be at most 10').default(1),
 });
 
 /**
@@ -116,9 +125,9 @@ export type RuleV003 = z.infer<typeof RuleV003Schema>;
  *
  * Configuration loaded from kafka-router.json for Kafka consumer plugin.
  *
- * @note FR-017 topic coverage validation is NOT applicable for spec 003
- *       because RuleV003Schema does not have a 'topic' field.
- *       Spec 003 uses JSONPath-based routing without explicit topic-rule mapping.
+ * @note FR-017 topic coverage validation is applied in spec 006
+ *       via validateTopicCoverage() in config.ts — checks that responseTopic
+ *       does not overlap with input topics.
  *
  * @see https://opencode-plugin-kafka/specs/003-kafka-consumer/spec.md
  */
