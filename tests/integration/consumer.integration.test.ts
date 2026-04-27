@@ -436,12 +436,32 @@ describe('T010: Invalid JSON → DLQ', () => {
   let producer: Producer;
   let dlqProducer: Producer;
 
+  /**
+   * Изолированный DLQ топик для T010.
+   * Используется чтобы избежать получения сообщений от других тестов.
+   */
+  const INVALID_JSON_DLQ = 'test-invalid-json-dlq';
+
   beforeEach(async () => {
     dlqProducer = kafka!.producer();
     await dlqProducer.connect();
+
+    // Создаём изолированный DLQ топик для T010
+    const admin = kafka!.admin();
+    await admin.connect();
+    await admin.createTopics({
+      topics: [{ topic: INVALID_JSON_DLQ, numPartitions: 1, replicationFactor: 1 }],
+    });
+    await admin.disconnect();
+
+    // Устанавливаем env для использования изолированного DLQ
+    process.env.KAFKA_DLQ_TOPIC = INVALID_JSON_DLQ;
   });
 
   afterEach(async () => {
+    // Восстанавливаем оригинальный DLQ топик
+    process.env.KAFKA_DLQ_TOPIC = TEST_DLQ_TOPIC;
+
     await dlqProducer?.disconnect();
   });
 
@@ -486,7 +506,7 @@ describe('T010: Invalid JSON → DLQ', () => {
     // Читаем DLQ чтобы проверить структуру
     const dlqConsumer = kafka!.consumer({ groupId: generateGroupId('dlq-check') });
     await dlqConsumer.connect();
-    await dlqConsumer.subscribe({ topics: [TEST_DLQ_TOPIC], fromBeginning: true });
+    await dlqConsumer.subscribe({ topics: [INVALID_JSON_DLQ], fromBeginning: true });
 
     const dlqMessages: string[] = [];
 
