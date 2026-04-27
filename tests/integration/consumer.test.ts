@@ -16,6 +16,7 @@ import { Kafka, type Consumer, type Producer } from 'kafkajs';
 import { RedpandaContainer } from '@testcontainers/redpanda';
 import type { StartedTestContainer } from 'testcontainers';
 import type { PluginConfigV003 } from '../../src/schemas/index.js';
+import type { IOpenCodeAgent, AgentResult } from '../../src/opencode/IOpenCodeAgent.js';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
 
 /**
@@ -26,6 +27,27 @@ interface MockConsumerState {
   totalMessagesProcessed: number;
   dlqMessagesCount: number;
   lastDlqRateLogTime: number;
+}
+
+/**
+ * Mock OpenCode Agent для тестов
+ * Возвращает успешный результат при вызове invoke
+ */
+class MockOpenCodeAgent implements IOpenCodeAgent {
+  async invoke(prompt: string, agentId: string, _options: { timeoutMs: number; signal?: AbortSignal }): Promise<AgentResult> {
+    console.log(`Mock agent invoked: agentId=${agentId}, prompt=${prompt.substring(0, 50)}...`);
+    return {
+      status: 'success',
+      response: `Mock response for: ${prompt.substring(0, 30)}`,
+      sessionId: `mock-session-${Date.now()}`,
+      executionTimeMs: 100,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  async abort(_sessionId: string): Promise<boolean> {
+    return true;
+  }
 }
 
 /**
@@ -86,6 +108,9 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
   let producer: Producer | null = null;
   let consumer: Consumer | null = null;
   let dlqProducer: Producer | null = null;
+  let responseProducer: Producer | null = null;
+  let mockAgent: MockOpenCodeAgent | null = null;
+  let activeSessions: Set<AbortController> | null = null;
   let useMockContainer = false;
 
   /**
@@ -161,11 +186,17 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
     producer = kafka.producer();
     consumer = kafka.consumer({ groupId, autoCommit: false });
     dlqProducer = kafka.producer();
+    responseProducer = kafka.producer();
+
+    // Создаём mock agent и activeSessions
+    mockAgent = new MockOpenCodeAgent();
+    activeSessions = new Set<AbortController>();
 
     // Подключаем producer и consumer
     await producer.connect();
     await consumer.connect();
     await dlqProducer.connect();
+    await responseProducer.connect();
 
     // Создаём темы (test topic и DLQ topic)
     const admin = kafka.admin();
@@ -182,15 +213,24 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
     console.log('Kafka topics created:', testTopic, dlqTopic);
   }, 120000); // 2 минуты timeout для запуска Redpanda
 
-  /**
-   * Cleanup: Остановка контейнера и закрытие соединений после всех тестов
-   */
+/**
+    * Cleanup: Остановка контейнера и закрытие соединений после всех тестов
+    */
   afterAll(async () => {
     try {
       if (!useMockContainer) {
+        // Принудительно останавливаем consumer если он ещё запущен
+        if (consumer) {
+          try {
+            await consumer.stop();
+          } catch {
+            // Игнорируем если уже остановлен
+          }
+          await consumer.disconnect();
+        }
         if (producer) await producer.disconnect();
-        if (consumer) await consumer.disconnect();
         if (dlqProducer) await dlqProducer.disconnect();
+        if (responseProducer) await responseProducer.disconnect();
       }
       if (redpandaContainer) await redpandaContainer.stop();
       console.log('Cleanup complete');
@@ -206,173 +246,185 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         console.warn('⏭️ Skipping T028: Mock container does not support real Kafka producer/consumer flow');
         return;
       }
-      // Step 1: Подписываем consumer на topic
-      await consumer.subscribe({ topic: testTopic, fromBeginning: true });
 
-      // Step 2: Создаём массив для хранения обработанных сообщений
-      const processedMessages: Array<{
-        matchedRule?: string;
-        prompt?: string;
-        error?: string;
-      }> = [];
+      let consumerRunPromise: Promise<void>;
+      try {
+        // Step 1: Подписываем consumer на topic
+        await consumer.subscribe({ topic: testTopic, fromBeginning: true });
 
-      // Создаем mock state для теста
-      const mockState: MockConsumerState = {
-        isShuttingDown: false,
-        totalMessagesProcessed: 0,
-        dlqMessagesCount: 0,
-        lastDlqRateLogTime: Date.now(),
-      };
+        // Step 2: Создаём массив для хранения обработанных сообщений
+        const processedMessages: Array<{
+          matchedRule?: string;
+          prompt?: string;
+          error?: string;
+        }> = [];
 
-      // Step 3: Запускаем consumer
-      const consumerRunPromise = consumer.run({
-        eachMessage: async (payload) => {
-          // Mock console.log для перехвата логов
-          const consoleLogSpy = vi.spyOn(console, 'log');
+        // Создаем mock state для теста
+        const mockState: MockConsumerState = {
+          isShuttingDown: false,
+          totalMessagesProcessed: 0,
+          dlqMessagesCount: 0,
+          lastDlqRateLogTime: Date.now(),
+        };
 
-          try {
-            // Вызываем eachMessageHandler
-            await eachMessageHandler(
-              {
-                topic: payload.topic,
-                partition: payload.partition,
-                message: {
-                  value: payload.message.value,
-                  offset: payload.message.offset,
-                  key: payload.message.key,
-                  headers: payload.message.headers,
-                  timestamp: payload.message.timestamp,
-                },
-              },
-              testConfig,
-              dlqProducer!,
-              consumer!.commitOffsets.bind(consumer!),
-              mockState,
-            );
+        // Step 3: Запускаем consumer
+        consumerRunPromise = consumer.run({
+          eachMessage: async (payload) => {
+            // Mock console.log для перехвата логов
+            const consoleLogSpy = vi.spyOn(console, 'log');
 
-            // Проверяем console.log для определения результата
-            const logCalls = consoleLogSpy.mock.calls;
-            const logMessages = logCalls.map((call) => call[0]);
-
-            // Ищем лог с event 'message_processed'
-            const processedLog = logMessages.find((log: string) => {
-              try {
-                const parsed = JSON.parse(log);
-                return parsed.event === 'message_processed';
-              } catch {
-                return false;
-              }
-            });
-
-            // Ищем лог с event 'no_rule_matched'
-            const noRuleLog = logMessages.find((log: string) => {
-              try {
-                const parsed = JSON.parse(log);
-                return parsed.event === 'no_rule_matched';
-              } catch {
-                return false;
-              }
-            });
-
-            if (processedLog) {
-              const parsed = JSON.parse(processedLog);
-              processedMessages.push({
-                matchedRule: parsed.matchedRule,
-                prompt: parsed.prompt,
-              });
-            } else if (noRuleLog) {
-              processedMessages.push({}); // No rule matched
-            }
-
-            consoleLogSpy.mockRestore();
-          } catch (error) {
-            console.error('Error in consumer eachMessage:', error);
-            processedMessages.push({
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        },
-      });
-
-      // Step 4: Ждём немного чтобы consumer начал слушать
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Step 5: Отправляем 3 тестовых сообщения
-      // Message 1: Matching rule (vulnerabilities with CRITICAL severity)
-      const message1 = {
-        vulnerabilities: [
-          { id: 'CVE-2024-1234', severity: 'CRITICAL', description: 'RCE' },
-        ],
-      };
-
-      // Message 2: Non-matching rule (task with type "review" not "code-audit")
-      const message2 = {
-        tasks: [
-          { type: 'review', description: 'Review this code' },
-        ],
-      };
-
-      // Message 3: Invalid JSON
-      const message3 = 'this is not valid json';
-
-      await producer.send({
-        topic: testTopic,
-        messages: [
-          { key: 'msg1', value: JSON.stringify(message1) },
-          { key: 'msg2', value: JSON.stringify(message2) },
-          { key: 'msg3', value: message3 },
-        ],
-      });
-
-      console.log('Messages sent to Kafka');
-
-      // Step 6: Ждём обработки сообщений (с таймаутом)
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-
-      // Step 7: Проверяем результаты
-      expect(processedMessages.length).toBeGreaterThanOrEqual(2); // Первые 2 сообщения должны быть обработаны
-
-      // Message 1: Должно совпасть с vuln-rule
-      expect(processedMessages[0].matchedRule).toBe('vuln-rule');
-      expect(processedMessages[0].prompt).toContain('Analyze vulnerabilities:');
-
-      // Message 2: Не должно совпасть (no rule matched)
-      expect(processedMessages[1].matchedRule).toBeUndefined();
-      expect(processedMessages[1].prompt).toBeUndefined();
-
-      // Message 3 (Invalid JSON): Должно быть отправлено в DLQ
-      // Проверяем DLQ topic
-      const dlqConsumer = kafka!.consumer({ groupId: 'dlq-test-group' });
-      await dlqConsumer.connect();
-      await dlqConsumer.subscribe({ topic: dlqTopic, fromBeginning: true });
-
-      const dlqMessages: Array<{ envelope: Record<string, unknown> }> = [];
-
-      await dlqConsumer.run({
-        eachMessage: async (payload) => {
-          const value = payload.message.value?.toString('utf-8');
-          if (value) {
             try {
-              const envelope = JSON.parse(value);
-              dlqMessages.push({ envelope });
+              // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
+              await eachMessageHandler(
+                {
+                  topic: payload.topic,
+                  partition: payload.partition,
+                  message: {
+                    value: payload.message.value,
+                    offset: payload.message.offset,
+                    key: payload.message.key,
+                    headers: payload.message.headers,
+                    timestamp: payload.message.timestamp,
+                  },
+                },
+                testConfig,
+                dlqProducer!,
+                consumer!.commitOffsets.bind(consumer!),
+                mockState,
+                mockAgent!,
+                responseProducer!,
+                activeSessions!,
+              );
+
+              // Проверяем console.log для определения результата
+              const logCalls = consoleLogSpy.mock.calls;
+              const logMessages = logCalls.map((call) => call[0]);
+
+              // Ищем лог с event 'message_processed'
+              const processedLog = logMessages.find((log: string) => {
+                try {
+                  const parsed = JSON.parse(log);
+                  return parsed.event === 'message_processed';
+                } catch {
+                  return false;
+                }
+              });
+
+              // Ищем лог с event 'no_rule_matched'
+              const noRuleLog = logMessages.find((log: string) => {
+                try {
+                  const parsed = JSON.parse(log);
+                  return parsed.event === 'no_rule_matched';
+                } catch {
+                  return false;
+                }
+              });
+
+              if (processedLog) {
+                const parsed = JSON.parse(processedLog);
+                processedMessages.push({
+                  matchedRule: parsed.matchedRule,
+                  prompt: parsed.prompt,
+                });
+              } else if (noRuleLog) {
+                processedMessages.push({}); // No rule matched
+              }
+
+              consoleLogSpy.mockRestore();
             } catch (error) {
-              console.error('Error parsing DLQ message:', error);
+              console.error('Error in consumer eachMessage:', error);
+              processedMessages.push({
+                error: error instanceof Error ? error.message : String(error),
+              });
             }
-          }
-        },
-      });
+          },
+        });
 
-      // Ждём получение DLQ сообщения
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+        // Step 4: Ждём немного чтобы consumer начал слушать
+        await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      expect(dlqMessages.length).toBeGreaterThan(0);
-      expect(dlqMessages[0].envelope.errorMessage).toContain('Failed to parse JSON');
+        // Step 5: Отправляем 3 тестовых сообщения
+        // Message 1: Matching rule (vulnerabilities with CRITICAL severity)
+        const message1 = {
+          vulnerabilities: [
+            { id: 'CVE-2024-1234', severity: 'CRITICAL', description: 'RCE' },
+          ],
+        };
 
-      await dlqConsumer.disconnect();
+        // Message 2: Non-matching rule (task with type "review" not "code-audit")
+        const message2 = {
+          tasks: [
+            { type: 'review', description: 'Review this code' },
+          ],
+        };
 
-      // Останавливаем consumer
-      await consumer.stop();
-      await consumerRunPromise;
+        // Message 3: Invalid JSON
+        const message3 = 'this is not valid json';
+
+        await producer.send({
+          topic: testTopic,
+          messages: [
+            { key: 'msg1', value: JSON.stringify(message1) },
+            { key: 'msg2', value: JSON.stringify(message2) },
+            { key: 'msg3', value: message3 },
+          ],
+        });
+
+        console.log('Messages sent to Kafka');
+
+        // Step 6: Ждём обработки сообщений (с таймаутом)
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+
+        // Step 7: Проверяем результаты
+        expect(processedMessages.length).toBeGreaterThanOrEqual(2); // Первые 2 сообщения должны быть обработаны
+
+        // Message 1: Должно совпасть с vuln-rule
+        expect(processedMessages[0].matchedRule).toBe('vuln-rule');
+        expect(processedMessages[0].prompt).toContain('Analyze vulnerabilities:');
+
+        // Message 2: Не должно совпасть (no rule matched)
+        expect(processedMessages[1].matchedRule).toBeUndefined();
+        expect(processedMessages[1].prompt).toBeUndefined();
+
+        // Message 3 (Invalid JSON): Должно быть отправлено в DLQ
+        // Проверяем DLQ topic
+        const dlqConsumer = kafka!.consumer({ groupId: 'dlq-test-group' });
+        await dlqConsumer.connect();
+        await dlqConsumer.subscribe({ topic: dlqTopic, fromBeginning: true });
+
+        const dlqMessages: Array<{ envelope: Record<string, unknown> }> = [];
+
+        await dlqConsumer.run({
+          eachMessage: async (payload) => {
+            const value = payload.message.value?.toString('utf-8');
+            if (value) {
+              try {
+                const envelope = JSON.parse(value);
+                dlqMessages.push({ envelope });
+              } catch (error) {
+                console.error('Error parsing DLQ message:', error);
+              }
+            }
+          },
+        });
+
+        // Ждём получение DLQ сообщения
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+
+        expect(dlqMessages.length).toBeGreaterThan(0);
+        expect(dlqMessages[0].envelope.errorMessage).toContain('Failed to parse JSON');
+
+        await dlqConsumer.disconnect();
+
+        // Останавливаем consumer (в try-finally чтобы гарантировать остановку)
+      } finally {
+        try {
+          await consumer!.stop();
+          await consumerRunPromise;
+        } catch (stopError) {
+          console.warn('Error stopping consumer in T028:', stopError);
+        }
+      }
     }, 30000); // 30 секунд timeout для этого теста
   });
 
@@ -383,132 +435,160 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         console.warn('⏭️ Skipping T029: Mock container does not support real Kafka producer/consumer flow');
         return;
       }
-      // Step 1: Подписываем consumer на topic
-      await consumer.subscribe({ topic: testTopic, fromBeginning: true });
 
-      // Step 2: Создаём искусственную задержку для каждого сообщения
-      // чтобы можно было измерить sequential processing time
-      const messageDelayMs = 100; // 100ms задержка на сообщение
-      const messageCount = 3;
-      const totalExpectedTimeMs = messageCount * messageDelayMs;
+      let consumerRunPromise: Promise<void>;
+      try {
+        // CRITICAL: Проверяем что consumer остановлен после T028
+        // Если T028 упал, consumer может остаться запущенным
+        try {
+          await consumer!.stop();
+        } catch {
+          // Игнорируем если уже остановлен
+        }
 
-      // Создаем mock state для теста
-      const mockState: MockConsumerState = {
-        isShuttingDown: false,
-        totalMessagesProcessed: 0,
-        dlqMessagesCount: 0,
-        lastDlqRateLogTime: Date.now(),
-      };
+        // Переподключаем consumer для T029 - отписываемся и заново подписываемся
+        // KafkaJS не позволяет подписываться к уже запущенному consumer
+        await consumer!.disconnect();
+        await consumer!.connect();
 
-      // Mock console.time/log для измерения времени обработки
-      const processingTimes: number[] = [];
+        // Сбрасываем activeSessions для нового теста
+        activeSessions!.clear();
 
-      const originalLog = console.log;
-      console.log = (...args: unknown[]) => {
-        // Проверяем лог message_processed для замера времени
-        const logStr = JSON.stringify(args);
-        if (logStr.includes('message_processed')) {
-          const logObj = JSON.parse(logStr);
-          if (logObj.processingTimeMs) {
-            processingTimes.push(logObj.processingTimeMs);
+        // Step 1: Подписываем consumer на topic
+        await consumer!.subscribe({ topic: testTopic, fromBeginning: true });
+
+        // Step 2: Создаём искусственную задержку для каждого сообщения
+        // чтобы можно было измерить sequential processing time
+        const messageDelayMs = 100; // 100ms задержка на сообщение
+        const messageCount = 3;
+        const totalExpectedTimeMs = messageCount * messageDelayMs;
+
+        // Создаем mock state для теста
+        const mockState: MockConsumerState = {
+          isShuttingDown: false,
+          totalMessagesProcessed: 0,
+          dlqMessagesCount: 0,
+          lastDlqRateLogTime: Date.now(),
+        };
+
+        // Mock console.time/log для измерения времени обработки
+        const processingTimes: number[] = [];
+
+        const originalLog = console.log;
+        console.log = (...args: unknown[]) => {
+          // Проверяем лог message_processed для замера времени
+          const logStr = JSON.stringify(args);
+          if (logStr.includes('message_processed')) {
+            const logObj = JSON.parse(logStr);
+            if (logObj.processingTimeMs) {
+              processingTimes.push(logObj.processingTimeMs);
+            }
+          }
+          originalLog(...args);
+        };
+
+        // Step 3: Запускаем consumer с искусственной задержкой
+        consumerRunPromise = consumer.run({
+          eachMessage: async (payload) => {
+            const startTime = Date.now();
+
+            try {
+              // Добавляем искусственную задержку
+              await new Promise((resolve) => setTimeout(resolve, messageDelayMs));
+
+              // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
+              await eachMessageHandler(
+                {
+                  topic: payload.topic,
+                  partition: payload.partition,
+                  message: {
+                    value: payload.message.value,
+                    offset: payload.message.offset,
+                    key: payload.message.key,
+                    headers: payload.message.headers,
+                    timestamp: payload.message.timestamp,
+                  },
+                },
+                testConfig,
+                dlqProducer!,
+                consumer!.commitOffsets.bind(consumer!),
+                mockState,
+                mockAgent!,
+                responseProducer!,
+                activeSessions!,
+              );
+
+              // Логируем время обработки
+              const processingTime = Date.now() - startTime;
+              console.log(
+                JSON.stringify({
+                  level: 'info',
+                  event: 'message_processed',
+                  processingTimeMs: processingTime,
+                }),
+              );
+            } catch (error) {
+              console.error('Error in consumer eachMessage:', error);
+            }
+          },
+        });
+
+        // Step 4: Ждём чтобы consumer начал слушать
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Step 5: Отправляем N сообщений
+        const messages = Array.from({ length: messageCount }, (_, i) => ({
+          vulnerabilities: [
+            { id: `CVE-2024-${i}`, severity: 'CRITICAL', description: `Vuln ${i}` },
+          ],
+        }));
+
+        const sendStartTime = Date.now();
+
+        await producer.send({
+          topic: testTopic,
+          messages: messages.map((msg, i) => ({
+            key: `seq-msg-${i}`,
+            value: JSON.stringify(msg),
+          })),
+        });
+
+        console.log(`${messageCount} messages sent to Kafka`);
+
+        // Step 6: Ждём обработки всех сообщений
+        await new Promise((resolve) => setTimeout(resolve, totalExpectedTimeMs + 2000));
+
+        const sendEndTime = Date.now();
+        const totalProcessingTime = sendEndTime - sendStartTime;
+
+        // Step 7: Проверяем что сообщения обрабатывались последовательно
+        // Время обработки должно быть примерно N × singleMessageTime
+        // Добавляем tolerance 20% для учета overhead
+        const tolerance = totalExpectedTimeMs * 0.2;
+        const minExpectedTime = totalExpectedTimeMs - tolerance;
+        const maxExpectedTime = totalExpectedTimeMs + tolerance;
+
+        console.log(`Total processing time: ${totalProcessingTime}ms`);
+        console.log(`Expected time: ${totalExpectedTimeMs}ms (±${tolerance}ms)`);
+        console.log(`Processing times per message:`, processingTimes);
+
+        expect(processingTimes.length).toBe(messageCount);
+        expect(totalProcessingTime).toBeGreaterThanOrEqual(minExpectedTime);
+        expect(totalProcessingTime).toBeLessThanOrEqual(maxExpectedTime + 2000); // +2s для overhead
+
+        // Восстанавливаем оригинальный console.log
+        console.log = originalLog;
+
+        // Останавливаем consumer (в try-finally чтобы гарантировать остановку)
+        } finally {
+          try {
+            await consumer!.stop();
+            await consumerRunPromise;
+          } catch (stopError) {
+            console.warn('Error stopping consumer in T029:', stopError);
           }
         }
-        originalLog(...args);
-      };
-
-      // Step 3: Запускаем consumer с искусственной задержкой
-      const consumerRunPromise = consumer.run({
-        eachMessage: async (payload) => {
-          const startTime = Date.now();
-
-          try {
-            // Добавляем искусственную задержку
-            await new Promise((resolve) => setTimeout(resolve, messageDelayMs));
-
-            // Вызываем eachMessageHandler
-            await eachMessageHandler(
-              {
-                topic: payload.topic,
-                partition: payload.partition,
-                message: {
-                  value: payload.message.value,
-                  offset: payload.message.offset,
-                  key: payload.message.key,
-                  headers: payload.message.headers,
-                  timestamp: payload.message.timestamp,
-                },
-              },
-              testConfig,
-              dlqProducer!,
-              consumer!.commitOffsets.bind(consumer!),
-              mockState,
-            );
-
-            // Логируем время обработки
-            const processingTime = Date.now() - startTime;
-            console.log(
-              JSON.stringify({
-                level: 'info',
-                event: 'message_processed',
-                processingTimeMs: processingTime,
-              }),
-            );
-          } catch (error) {
-            console.error('Error in consumer eachMessage:', error);
-          }
-        },
-      });
-
-      // Step 4: Ждём чтобы consumer начал слушать
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Step 5: Отправляем N сообщений
-      const messages = Array.from({ length: messageCount }, (_, i) => ({
-        vulnerabilities: [
-          { id: `CVE-2024-${i}`, severity: 'CRITICAL', description: `Vuln ${i}` },
-        ],
-      }));
-
-      const sendStartTime = Date.now();
-
-      await producer.send({
-        topic: testTopic,
-        messages: messages.map((msg, i) => ({
-          key: `seq-msg-${i}`,
-          value: JSON.stringify(msg),
-        })),
-      });
-
-      console.log(`${messageCount} messages sent to Kafka`);
-
-      // Step 6: Ждём обработки всех сообщений
-      await new Promise((resolve) => setTimeout(resolve, totalExpectedTimeMs + 2000));
-
-      const sendEndTime = Date.now();
-      const totalProcessingTime = sendEndTime - sendStartTime;
-
-      // Step 7: Проверяем что сообщения обрабатывались последовательно
-      // Время обработки должно быть примерно N × singleMessageTime
-      // Добавляем tolerance 20% для учета overhead
-      const tolerance = totalExpectedTimeMs * 0.2;
-      const minExpectedTime = totalExpectedTimeMs - tolerance;
-      const maxExpectedTime = totalExpectedTimeMs + tolerance;
-
-      console.log(`Total processing time: ${totalProcessingTime}ms`);
-      console.log(`Expected time: ${totalExpectedTimeMs}ms (±${tolerance}ms)`);
-      console.log(`Processing times per message:`, processingTimes);
-
-      expect(processingTimes.length).toBe(messageCount);
-      expect(totalProcessingTime).toBeGreaterThanOrEqual(minExpectedTime);
-      expect(totalProcessingTime).toBeLessThanOrEqual(maxExpectedTime + 2000); // +2s для overhead
-
-      // Восстанавливаем оригинальный console.log
-      console.log = originalLog;
-
-      // Останавливаем consumer
-      await consumer.stop();
-      await consumerRunPromise;
-    }, 30000); // 30 секунд timeout для этого теста
+      }, 30000); // 30 секунд timeout для этого теста
   });
 
   describe('Redpanda Container Lifecycle', () => {
@@ -540,6 +620,26 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         send: vi.fn().mockResolvedValue(undefined),
       } as unknown as Producer;
 
+      // Mock response producer
+      const mockResponseProducer = {
+        send: vi.fn().mockResolvedValue(undefined),
+      } as unknown as Producer;
+
+      // Mock agent
+      const mockAgent: IOpenCodeAgent = {
+        invoke: vi.fn().mockResolvedValue({
+          status: 'success' as const,
+          response: 'Mock response',
+          sessionId: 'mock-session',
+          executionTimeMs: 100,
+          timestamp: new Date().toISOString(),
+        }),
+        abort: vi.fn().mockResolvedValue(true),
+      };
+
+      // Mock activeSessions
+      const mockActiveSessions = new Set<AbortController>();
+
       // Создаем mock state для теста
       const mockState: MockConsumerState = {
         isShuttingDown: false,
@@ -565,8 +665,8 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         },
       };
 
-      // Вызываем eachMessageHandler
-      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
+      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, mockActiveSessions);
 
       // Проверяем что commitOffsets был вызван (успешная обработка)
       expect(mockCommitOffsets).toHaveBeenCalledWith([
@@ -609,6 +709,20 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         send: vi.fn().mockResolvedValue(undefined),
       } as unknown as Producer;
 
+      // Mock response producer (не используется в этом тесте)
+      const mockResponseProducer = {
+        send: vi.fn().mockResolvedValue(undefined),
+      } as unknown as Producer;
+
+      // Mock agent (не используется в этом тесте - нет matching rule)
+      const mockAgent: IOpenCodeAgent = {
+        invoke: vi.fn(),
+        abort: vi.fn().mockResolvedValue(true),
+      };
+
+      // Mock activeSessions
+      const mockActiveSessions = new Set<AbortController>();
+
       // Создаем mock state для теста
       const mockState: MockConsumerState = {
         isShuttingDown: false,
@@ -634,8 +748,8 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         },
       };
 
-      // Вызываем eachMessageHandler
-      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
+      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, mockActiveSessions);
 
       // Проверяем что commitOffsets был вызван (no error)
       expect(mockCommitOffsets).toHaveBeenCalledWith([
@@ -679,6 +793,20 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         send: vi.fn().mockResolvedValue(undefined),
       } as unknown as Producer;
 
+      // Mock response producer (не используется в этом тесте - ошибка парсинга)
+      const mockResponseProducer = {
+        send: vi.fn().mockResolvedValue(undefined),
+      } as unknown as Producer;
+
+      // Mock agent (не используется в этом тесте - ошибка парсинга до matching)
+      const mockAgent: IOpenCodeAgent = {
+        invoke: vi.fn(),
+        abort: vi.fn().mockResolvedValue(true),
+      };
+
+      // Mock activeSessions
+      const mockActiveSessions = new Set<AbortController>();
+
       // Создаем mock state для теста
       const mockState: MockConsumerState = {
         isShuttingDown: false,
@@ -700,8 +828,8 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         },
       };
 
-      // Вызываем eachMessageHandler
-      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
+      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, mockActiveSessions);
 
       // Проверяем что DLQ был вызван (invalid JSON → DLQ)
       expect(mockDlqProducer.send).toHaveBeenCalled();
@@ -746,6 +874,20 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         send: vi.fn().mockResolvedValue(undefined),
       } as unknown as Producer;
 
+      // Mock response producer (не используется в этом тесте - tombstone)
+      const mockResponseProducer = {
+        send: vi.fn().mockResolvedValue(undefined),
+      } as unknown as Producer;
+
+      // Mock agent (не используется в этом тесте - tombstone)
+      const mockAgent: IOpenCodeAgent = {
+        invoke: vi.fn(),
+        abort: vi.fn().mockResolvedValue(true),
+      };
+
+      // Mock activeSessions
+      const mockActiveSessions = new Set<AbortController>();
+
       // Создаем mock state для теста
       const mockState: MockConsumerState = {
         isShuttingDown: false,
@@ -767,8 +909,8 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         },
       };
 
-      // Вызываем eachMessageHandler
-      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
+      await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, mockActiveSessions);
 
       // Проверяем что DLQ был вызван (tombstone → DLQ)
       expect(mockDlqProducer.send).toHaveBeenCalled();

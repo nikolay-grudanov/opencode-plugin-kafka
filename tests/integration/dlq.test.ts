@@ -509,10 +509,13 @@ describe('Integration Tests: DLQ Flow', () => {
     });
 
     it('должен обрабатывать полный поток: unexpected error → DLQ → commit', async () => {
-      // Mock commitOffsets to throw (simulating unexpected error)
-      mockCommitOffsets.mockImplementationOnce(() => {
-        throw new Error('Commit failed');
-      });
+      // Mock commitOffsets to throw on FIRST call (simulating unexpected error),
+      // but resolve on SECOND call (in catch-all block after DLQ send)
+      mockCommitOffsets
+        .mockImplementationOnce(() => {
+          throw new Error('Commit failed');
+        })
+        .mockResolvedValueOnce(undefined);
 
       const payload = {
         topic: 'test-topic',
