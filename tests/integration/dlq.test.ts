@@ -10,7 +10,7 @@
  * @fileoverview Tests for DLQ integration with eachMessageHandler
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi, beforeEach, afterEach } from 'vitest';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
 import type { PluginConfigV003 } from '../../src/schemas/index.js';
 import type { Producer } from 'kafkajs';

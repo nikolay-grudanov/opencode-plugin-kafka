@@ -13,7 +13,8 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { Kafka, type Consumer, type Producer } from 'kafkajs';
-import { GenericContainer, type StartedTestContainer } from 'testcontainers';
+import { RedpandaContainer } from '@testcontainers/redpanda';
+import type { StartedTestContainer } from 'testcontainers';
 import type { PluginConfigV003 } from '../../src/schemas/index.js';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
 
@@ -120,8 +121,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
   beforeAll(async () => {
     try {
       // Пытаемся запустить реальный Redpanda контейнер
-      redpandaContainer = await new GenericContainer('docker.redpanda.com/redpandadata/redpanda:v23.3.10')
-        .withExposedPorts(9092, 9644)
+      redpandaContainer = await new RedpandaContainer('docker.redpanda.com/redpandadata/redpanda:latest')
         .withStartupTimeout(120000) // 2 минуты timeout
         .start();
 
