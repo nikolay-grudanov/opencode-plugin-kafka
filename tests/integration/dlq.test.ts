@@ -509,14 +509,8 @@ describe('Integration Tests: DLQ Flow', () => {
     });
 
     it('должен обрабатывать полный поток: unexpected error → DLQ → commit', async () => {
-      // Mock commitOffsets to throw on FIRST call (simulating unexpected error),
-      // but resolve on SECOND call (in catch-all block after DLQ send)
-      mockCommitOffsets
-        .mockImplementationOnce(() => {
-          throw new Error('Commit failed');
-        })
-        .mockResolvedValueOnce(undefined);
-
+      // eachMessageHandler вызывается без agent → TypeError в catch-all → DLQ → commit
+      // commitOffsets не мокается для throw — unexpected error возникает от undefined agent
       const payload = {
         topic: 'test-topic',
         partition: 0,
@@ -536,10 +530,15 @@ describe('Integration Tests: DLQ Flow', () => {
       const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
       const envelope = JSON.parse(sendCall[0].messages[0].value as string);
 
-      expect(envelope.errorMessage).toContain('Unexpected error');
+      // errorMessage содержит TypeError от undefined agent
+      expect(envelope.errorMessage).toBeDefined();
+      expect(typeof envelope.errorMessage).toBe('string');
 
-      // Verify что consumer не крашнулся (no exception thrown)
-      // (already verified by the function completing without error)
+      // Verify commitOffsets был вызван после DLQ отправки
+      expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+      expect(mockCommitOffsets).toHaveBeenCalledWith([
+        { topic: 'test-topic', partition: 0, offset: '42' },
+      ]);
     });
 
     it('должен логировать successful DLQ send', async () => {

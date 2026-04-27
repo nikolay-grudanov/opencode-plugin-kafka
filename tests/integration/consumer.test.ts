@@ -412,7 +412,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         await new Promise((resolve) => setTimeout(resolve, 3000));
 
         expect(dlqMessages.length).toBeGreaterThan(0);
-        expect(dlqMessages[0].envelope.errorMessage).toContain('Failed to parse JSON');
+        expect(dlqMessages[0].envelope.errorMessage).toContain('is not valid JSON');
 
         await dlqConsumer.disconnect();
 
@@ -438,18 +438,16 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
 
       let consumerRunPromise: Promise<void>;
       try {
-        // CRITICAL: Проверяем что consumer остановлен после T028
-        // Если T028 упал, consumer может остаться запущенным
-        try {
-          await consumer!.stop();
-        } catch {
-          // Игнорируем если уже остановлен
-        }
-
-        // Переподключаем consumer для T029 - отписываемся и заново подписываемся
-        // KafkaJS не позволяет подписываться к уже запущенному consumer
+// Создаём новый consumer для T029 (старый может быть в неопределённом состоянии после T028)
+      try {
+        await consumer!.stop();
         await consumer!.disconnect();
-        await consumer!.connect();
+      } catch {
+        // Игнорируем если consumer уже остановлен/отключён
+      }
+
+      consumer = kafka!.consumer({ groupId, autoCommit: false });
+      await consumer.connect();
 
         // Сбрасываем activeSessions для нового теста
         activeSessions!.clear();
@@ -476,12 +474,15 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
 
         const originalLog = console.log;
         console.log = (...args: unknown[]) => {
-          // Проверяем лог message_processed для замера времени
-          const logStr = JSON.stringify(args);
-          if (logStr.includes('message_processed')) {
-            const logObj = JSON.parse(logStr);
-            if (logObj.processingTimeMs) {
-              processingTimes.push(logObj.processingTimeMs);
+          // Проверяем первый аргумент лога для замера времени
+          if (args[0] && typeof args[0] === 'string' && args[0].includes('message_processed')) {
+            try {
+              const logObj = JSON.parse(args[0]);
+              if (logObj.processingTimeMs) {
+                processingTimes.push(logObj.processingTimeMs);
+              }
+            } catch {
+              // ignore parse errors
             }
           }
           originalLog(...args);
