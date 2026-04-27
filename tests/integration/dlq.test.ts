@@ -13,28 +13,18 @@
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach, afterEach } from 'vitest';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
 import type { PluginConfigV003 } from '../../src/schemas/index.js';
-import type { Producer } from 'kafkajs';
-import type { IOpenCodeAgent } from '../../src/opencode/IOpenCodeAgent.js';
 
 // Import setup functions (могут быть использованы для будущих реальных integration tests)
 import { createRedpandaContainer, cleanupRedpandaContainer } from './setup';
 import type { StartedTestContainer } from 'testcontainers';
 
-/**
- * Mock состояние consumer для тестов (Constitution Principle IV: No-State Consumer)
- */
-interface MockConsumerState {
-  isShuttingDown: boolean;
-  totalMessagesProcessed: number;
-  dlqMessagesCount: number;
-  lastDlqRateLogTime: number;
-}
+// Import helpers для mock объектов
+import { createMockHandlerDeps, createMockErrorAgent, createMockTimeoutAgent } from './helpers/index.js';
+import type { MockHandlerDeps } from './helpers/index.js';
 
 describe('Integration Tests: DLQ Flow', () => {
   let redpandaContainer: StartedTestContainer | null = null;
-  let mockDlqProducer: Producer;
-  let mockCommitOffsets: ReturnType<typeof vi.fn>;
-  let mockState: MockConsumerState;
+  let deps: MockHandlerDeps;
   let mockConfig: PluginConfigV003;
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
@@ -63,21 +53,8 @@ describe('Integration Tests: DLQ Flow', () => {
    * Setup перед каждым тестом
    */
   beforeEach(() => {
-    // Создаем mock producer
-    mockDlqProducer = {
-      send: vi.fn().mockResolvedValue(undefined),
-    } as unknown as Producer;
-
-    // Создаем mock commitOffsets
-    mockCommitOffsets = vi.fn().mockResolvedValue(undefined);
-
-    // Создаем mock state
-    mockState = {
-      isShuttingDown: false,
-      totalMessagesProcessed: 0,
-      dlqMessagesCount: 0,
-      lastDlqRateLogTime: Date.now(),
-    };
+    // Используем factory для создания полного набора mock зависимостей
+    deps = createMockHandlerDeps();
 
     // Создаем тестовую конфигурацию
     mockConfig = {
@@ -121,13 +98,13 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
       // Проверяем что Producer.send был вызван (сообщение отправлено в DLQ)
-      expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
+      expect(deps.dlqProducer.send).toHaveBeenCalledTimes(1);
 
       // Получаем отправленный envelope
-      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      const sendCall = vi.mocked(deps.dlqProducer.send).mock.calls[0];
       const record = sendCall[0];
       const envelope = JSON.parse(record.messages[0].value as string);
 
@@ -140,8 +117,8 @@ describe('Integration Tests: DLQ Flow', () => {
       expect(envelope.failedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/); // ISO 8601
 
       // Проверяем что commitOffsets был вызван (сообщение НЕ retry'ится)
-      expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
-      expect(mockCommitOffsets).toHaveBeenCalledWith([
+      expect(deps.commitOffsets).toHaveBeenCalledTimes(1);
+      expect(deps.commitOffsets).toHaveBeenCalledWith([
         { topic: 'test-topic', partition: 0, offset: '42' },
       ]);
     });
@@ -159,12 +136,12 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
       // Verify DLQ send
-      expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
+      expect(deps.dlqProducer.send).toHaveBeenCalledTimes(1);
 
-      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      const sendCall = vi.mocked(deps.dlqProducer.send).mock.calls[0];
       const envelope = JSON.parse(sendCall[0].messages[0].value as string);
 
       expect(envelope.originalValue).toBe('{"test": unclosed}');
@@ -174,7 +151,7 @@ describe('Integration Tests: DLQ Flow', () => {
       expect(envelope.errorMessage).toMatch(/JSON/i);
 
       // Verify commit
-      expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+      expect(deps.commitOffsets).toHaveBeenCalledTimes(1);
     });
 
     it('должен отправить в DLQ при пустом JSON', async () => {
@@ -190,12 +167,12 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
       // Verify DLQ send
-      expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
+      expect(deps.dlqProducer.send).toHaveBeenCalledTimes(1);
 
-      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      const sendCall = vi.mocked(deps.dlqProducer.send).mock.calls[0];
       const envelope = JSON.parse(sendCall[0].messages[0].value as string);
 
       expect(envelope.originalValue).toBe('');
@@ -217,9 +194,9 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
-      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      const sendCall = vi.mocked(deps.dlqProducer.send).mock.calls[0];
       const envelope = JSON.parse(sendCall[0].messages[0].value as string);
 
       // Проверяем все required fields из FR-022
@@ -253,10 +230,10 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
       const afterCall = Date.now();
 
-      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      const sendCall = vi.mocked(deps.dlqProducer.send).mock.calls[0];
       const envelope = JSON.parse(sendCall[0].messages[0].value as string);
 
       // Проверяем что failedAt валидный ISO timestamp
@@ -281,9 +258,9 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
-      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      const sendCall = vi.mocked(deps.dlqProducer.send).mock.calls[0];
       const record = sendCall[0];
 
       // Проверяем что topic = {original-topic}-dlq
@@ -306,9 +283,9 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
-      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      const sendCall = vi.mocked(deps.dlqProducer.send).mock.calls[0];
       const record = sendCall[0];
 
       // Проверяем что используется custom DLQ topic
@@ -334,18 +311,18 @@ describe('Integration Tests: DLQ Flow', () => {
       };
 
       // Mock Producer.send() to throw error
-      vi.mocked(mockDlqProducer.send).mockRejectedValueOnce(
+      vi.mocked(deps.dlqProducer.send).mockRejectedValueOnce(
         new Error('Kafka connection failed')
       );
 
       // eachMessageHandler НЕ должен бросить исключение
       await expect(
-        eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState)
+        eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions)
       ).resolves.not.toThrow();
 
       // Проверяем что commitOffsets был вызван (consumer продолжает работать)
-      expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
-      expect(mockCommitOffsets).toHaveBeenCalledWith([
+      expect(deps.commitOffsets).toHaveBeenCalledTimes(1);
+      expect(deps.commitOffsets).toHaveBeenCalledWith([
         { topic: 'test-topic', partition: 0, offset: '42' },
       ]);
     });
@@ -364,9 +341,9 @@ describe('Integration Tests: DLQ Flow', () => {
       };
 
       const kafkaError = new Error('Kafka connection failed');
-      vi.mocked(mockDlqProducer.send).mockRejectedValueOnce(kafkaError);
+      vi.mocked(deps.dlqProducer.send).mockRejectedValueOnce(kafkaError);
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
       // Проверяем что console.error был вызван
       expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
@@ -420,7 +397,7 @@ describe('Integration Tests: DLQ Flow', () => {
       ];
 
       // Mock Producer.send() для первого и третьего сообщений (fail), для второго (success)
-      vi.mocked(mockDlqProducer.send)
+      vi.mocked(deps.dlqProducer.send)
         .mockRejectedValueOnce(new Error('Kafka connection failed'))
         .mockResolvedValueOnce(undefined)
         .mockRejectedValueOnce(new Error('Kafka connection failed'));
@@ -428,15 +405,15 @@ describe('Integration Tests: DLQ Flow', () => {
       // Обрабатываем все сообщения
       for (const payload of payloads) {
         await expect(
-          eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState)
+          eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions)
         ).resolves.not.toThrow();
       }
 
       // Проверяем что все сообщения были закоммичены (consumer не крашнулся)
-      expect(mockCommitOffsets).toHaveBeenCalledTimes(3);
-      expect(mockCommitOffsets).toHaveBeenNthCalledWith(1, [{ topic: 'test-topic', partition: 0, offset: '1' }]);
-      expect(mockCommitOffsets).toHaveBeenNthCalledWith(2, [{ topic: 'test-topic', partition: 0, offset: '2' }]);
-      expect(mockCommitOffsets).toHaveBeenNthCalledWith(3, [{ topic: 'test-topic', partition: 0, offset: '3' }]);
+      expect(deps.commitOffsets).toHaveBeenCalledTimes(3);
+      expect(deps.commitOffsets).toHaveBeenNthCalledWith(1, [{ topic: 'test-topic', partition: 0, offset: '1' }]);
+      expect(deps.commitOffsets).toHaveBeenNthCalledWith(2, [{ topic: 'test-topic', partition: 0, offset: '2' }]);
+      expect(deps.commitOffsets).toHaveBeenNthCalledWith(3, [{ topic: 'test-topic', partition: 0, offset: '3' }]);
     });
   });
 
@@ -454,11 +431,11 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
       // Verify DLQ send
-      expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
-      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      expect(deps.dlqProducer.send).toHaveBeenCalledTimes(1);
+      const sendCall = vi.mocked(deps.dlqProducer.send).mock.calls[0];
       const envelope = JSON.parse(sendCall[0].messages[0].value as string);
 
       expect(envelope.originalValue).toBe('invalid json');
@@ -467,8 +444,8 @@ describe('Integration Tests: DLQ Flow', () => {
       expect(envelope.offset).toBe('42');
 
       // Step 2: Verify commitOffsets
-      expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
-      expect(mockCommitOffsets).toHaveBeenCalledWith([
+      expect(deps.commitOffsets).toHaveBeenCalledTimes(1);
+      expect(deps.commitOffsets).toHaveBeenCalledWith([
         { topic: 'test-topic', partition: 0, offset: '42' },
       ]);
 
@@ -494,23 +471,26 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
       // Verify DLQ send
-      expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
-      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      expect(deps.dlqProducer.send).toHaveBeenCalledTimes(1);
+      const sendCall = vi.mocked(deps.dlqProducer.send).mock.calls[0];
       const envelope = JSON.parse(sendCall[0].messages[0].value as string);
 
       expect(envelope.originalValue).toBe('{"test": "value"}');
       expect(envelope.errorMessage).toBe('matchRuleV003 failed');
 
       // Verify commitOffsets
-      expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+      expect(deps.commitOffsets).toHaveBeenCalledTimes(1);
     });
 
     it('должен обрабатывать полный поток: unexpected error → DLQ → commit', async () => {
-      // eachMessageHandler вызывается без agent → TypeError в catch-all → DLQ → commit
-      // commitOffsets не мокается для throw — unexpected error возникает от undefined agent
+      // Mock matchRuleV003 to throw unexpected error
+      vi.spyOn(await import('../../src/core/routing.js'), 'matchRuleV003').mockImplementationOnce(() => {
+        throw new Error('Unexpected internal error');
+      });
+
       const payload = {
         topic: 'test-topic',
         partition: 0,
@@ -523,20 +503,19 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
-      // Verify DLQ send (catch-all в eachMessageHandler отправляет в DLQ)
-      expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
-      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      // Verify DLQ send
+      expect(deps.dlqProducer.send).toHaveBeenCalledTimes(1);
+      const sendCall = vi.mocked(deps.dlqProducer.send).mock.calls[0];
       const envelope = JSON.parse(sendCall[0].messages[0].value as string);
 
-      // errorMessage содержит TypeError от undefined agent
-      expect(envelope.errorMessage).toBeDefined();
-      expect(typeof envelope.errorMessage).toBe('string');
+      expect(envelope.errorMessage).toBe('Unexpected internal error');
+      expect(envelope.originalValue).toBe('{"test": "value"}');
 
-      // Verify commitOffsets был вызван после DLQ отправки
-      expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
-      expect(mockCommitOffsets).toHaveBeenCalledWith([
+      // Verify commitOffsets был вызван
+      expect(deps.commitOffsets).toHaveBeenCalledTimes(1);
+      expect(deps.commitOffsets).toHaveBeenCalledWith([
         { topic: 'test-topic', partition: 0, offset: '42' },
       ]);
     });
@@ -554,7 +533,7 @@ describe('Integration Tests: DLQ Flow', () => {
         },
       };
 
-      await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState);
+      await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
       // Verify console.log was called with dlq_sent event
       expect(consoleLogSpy).toHaveBeenCalled();
@@ -569,31 +548,9 @@ describe('Integration Tests: DLQ Flow', () => {
    * Agent Error/Timeout сценарии (MAJOR M8)
    */
   describe('Agent Error → DLQ', () => {
-    let mockAgent: IOpenCodeAgent;
-    let mockResponseProducer: Producer;
-    let activeSessions: Set<AbortController>;
-
     beforeEach(() => {
-      // Mock agent с ошибкой
-      mockAgent = {
-        invoke: vi.fn().mockResolvedValue({
-          status: 'error' as const,
-          errorMessage: 'Agent processing failed',
-          sessionId: 'sess_error',
-          executionTimeMs: 100,
-          timestamp: new Date().toISOString(),
-        }),
-        abort: vi.fn().mockResolvedValue(true),
-      };
-
-      // Mock response producer
-      mockResponseProducer = {
-        send: vi.fn().mockResolvedValue(undefined),
-        connect: vi.fn().mockResolvedValue(undefined),
-        disconnect: vi.fn().mockResolvedValue(undefined),
-      } as unknown as Producer;
-
-      activeSessions = new Set<AbortController>();
+      // Override agent с ошибкой
+      deps.agent = createMockErrorAgent('Agent processing failed');
     });
 
     it('отправляет сообщение в DLQ когда агент возвращает status=error', async () => {
@@ -612,19 +569,19 @@ describe('Integration Tests: DLQ Flow', () => {
       await eachMessageHandler(
         payload,
         mockConfig,
-        mockDlqProducer,
-        mockCommitOffsets,
-        mockState,
-        mockAgent,
-        mockResponseProducer,
-        activeSessions
+        deps.dlqProducer,
+        deps.commitOffsets,
+        deps.state,
+        deps.agent,
+        deps.responseProducer,
+        deps.activeSessions
       );
 
       // Проверяем что sendToDlq вызван
-      expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
+      expect(deps.dlqProducer.send).toHaveBeenCalledTimes(1);
 
       // Получаем отправленный envelope
-      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      const sendCall = vi.mocked(deps.dlqProducer.send).mock.calls[0];
       const record = sendCall[0];
       const envelope = JSON.parse(record.messages[0].value as string);
 
@@ -633,36 +590,14 @@ describe('Integration Tests: DLQ Flow', () => {
       expect(envelope.errorMessage).toContain('error');
 
       // Проверяем что commitOffsets вызван
-      expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+      expect(deps.commitOffsets).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('Agent Timeout → DLQ', () => {
-    let mockAgent: IOpenCodeAgent;
-    let mockResponseProducer: Producer;
-    let activeSessions: Set<AbortController>;
-
     beforeEach(() => {
-      // Mock agent с timeout
-      mockAgent = {
-        invoke: vi.fn().mockResolvedValue({
-          status: 'timeout' as const,
-          errorMessage: 'Agent timed out after 120000ms',
-          sessionId: 'sess_timeout',
-          executionTimeMs: 120000,
-          timestamp: new Date().toISOString(),
-        }),
-        abort: vi.fn().mockResolvedValue(true),
-      };
-
-      // Mock response producer
-      mockResponseProducer = {
-        send: vi.fn().mockResolvedValue(undefined),
-        connect: vi.fn().mockResolvedValue(undefined),
-        disconnect: vi.fn().mockResolvedValue(undefined),
-      } as unknown as Producer;
-
-      activeSessions = new Set<AbortController>();
+      // Override agent с timeout
+      deps.agent = createMockTimeoutAgent(120000);
     });
 
     it('отправляет сообщение в DLQ когда агент возвращает status=timeout', async () => {
@@ -681,19 +616,19 @@ describe('Integration Tests: DLQ Flow', () => {
       await eachMessageHandler(
         payload,
         mockConfig,
-        mockDlqProducer,
-        mockCommitOffsets,
-        mockState,
-        mockAgent,
-        mockResponseProducer,
-        activeSessions
+        deps.dlqProducer,
+        deps.commitOffsets,
+        deps.state,
+        deps.agent,
+        deps.responseProducer,
+        deps.activeSessions
       );
 
       // Проверяем что sendToDlq вызван
-      expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
+      expect(deps.dlqProducer.send).toHaveBeenCalledTimes(1);
 
       // Получаем отправленный envelope
-      const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
+      const sendCall = vi.mocked(deps.dlqProducer.send).mock.calls[0];
       const record = sendCall[0];
       const envelope = JSON.parse(record.messages[0].value as string);
 
@@ -702,7 +637,7 @@ describe('Integration Tests: DLQ Flow', () => {
       expect(envelope.errorMessage).toContain('120000');
 
       // Проверяем что commitOffsets вызван
-      expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
+      expect(deps.commitOffsets).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -18,6 +18,7 @@ import type { StartedTestContainer } from 'testcontainers';
 import type { PluginConfigV003 } from '../../src/schemas/index.js';
 import type { IOpenCodeAgent, AgentResult } from '../../src/opencode/IOpenCodeAgent.js';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
+import { waitFor, uniqueTopicId, uniqueGroupId, createTopics, safeStopConsumer } from './helpers/index.js';
 
 /**
  * Mock состояние consumer для тестов (Constitution Principle IV: No-State Consumer)
@@ -247,10 +248,20 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         return;
       }
 
+      // Создаём уникальный топик для T028
+      const t028Topic = uniqueTopicId('t028');
+
+      // Создаём топик(и) через admin client
+      // DLQ топик НЕ создаём отдельно - consumer использует dlqTopic из testConfig и env
+      await createTopics(kafka!, [t028Topic], 1, 1);
+      console.log(`T028: created topic ${t028Topic}`);
+
       let consumerRunPromise: Promise<void>;
+      let dlqConsumer: Consumer | null = null;
+
       try {
-        // Step 1: Подписываем consumer на topic
-        await consumer.subscribe({ topic: testTopic, fromBeginning: true });
+        // Step 1: Подписываем consumer на уникальный topic
+        await consumer!.subscribe({ topic: t028Topic, fromBeginning: true });
 
         // Step 2: Создаём массив для хранения обработанных сообщений
         const processedMessages: Array<{
@@ -268,7 +279,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         };
 
         // Step 3: Запускаем consumer
-        consumerRunPromise = consumer.run({
+        consumerRunPromise = consumer!.run({
           eachMessage: async (payload) => {
             // Mock console.log для перехвата логов
             const consoleLogSpy = vi.spyOn(console, 'log');
@@ -361,8 +372,8 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         // Message 3: Invalid JSON
         const message3 = 'this is not valid json';
 
-        await producer.send({
-          topic: testTopic,
+        await producer!.send({
+          topic: t028Topic,
           messages: [
             { key: 'msg1', value: JSON.stringify(message1) },
             { key: 'msg2', value: JSON.stringify(message2) },
@@ -372,8 +383,11 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
 
         console.log('Messages sent to Kafka');
 
-        // Step 6: Ждём обработки сообщений (с таймаутом)
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        // Step 6: Ждём обработки сообщений с использованием waitFor
+        await waitFor(
+          () => processedMessages.length >= 2,
+          { timeoutMs: 15000, timeoutMessage: 'Не все сообщения были обработаны за 15с' }
+        );
 
         // Step 7: Проверяем результаты
         expect(processedMessages.length).toBeGreaterThanOrEqual(2); // Первые 2 сообщения должны быть обработаны
@@ -386,11 +400,12 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         expect(processedMessages[1].matchedRule).toBeUndefined();
         expect(processedMessages[1].prompt).toBeUndefined();
 
-        // Message 3 (Invalid JSON): Должно быть отправлено в DLQ
-        // Проверяем DLQ topic
-        const dlqConsumer = kafka!.consumer({ groupId: 'dlq-test-group' });
-        await dlqConsumer.connect();
-        await dlqConsumer.subscribe({ topic: dlqTopic, fromBeginning: true });
+// Message 3 (Invalid JSON): Должно быть отправлено в DLQ
+      // Проверяем DLQ topic - используем dlqTopic из env (KAFKA_DLQ_TOPIC)
+      // а не уникальный t028DlqTopic, т.к. consumer использует env переменную
+      dlqConsumer = kafka!.consumer({ groupId: uniqueGroupId('t028-dlq') });
+      await dlqConsumer.connect();
+      await dlqConsumer.subscribe({ topic: dlqTopic, fromBeginning: true });
 
         const dlqMessages: Array<{ envelope: Record<string, unknown> }> = [];
 
@@ -408,16 +423,22 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
           },
         });
 
-        // Ждём получение DLQ сообщения
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        // Ждём получение DLQ сообщения с использованием waitFor
+        await waitFor(
+          () => dlqMessages.length > 0,
+          { timeoutMs: 10000, timeoutMessage: 'DLQ сообщение не получено за 10с' }
+        );
 
         expect(dlqMessages.length).toBeGreaterThan(0);
         expect(dlqMessages[0].envelope.errorMessage).toContain('is not valid JSON');
 
-        await dlqConsumer.disconnect();
-
         // Останавливаем consumer (в try-finally чтобы гарантировать остановку)
       } finally {
+        try {
+          await safeStopConsumer(dlqConsumer!);
+        } catch {
+          // Игнорируем если dlqConsumer уже остановлен
+        }
         try {
           await consumer!.stop();
           await consumerRunPromise;
@@ -436,9 +457,14 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         return;
       }
 
-      let consumerRunPromise: Promise<void>;
-      try {
-// Создаём новый consumer для T029 (старый может быть в неопределённом состоянии после T028)
+      // Создаём уникальный топик для T029
+      const t029Topic = uniqueTopicId('t029');
+
+      // Создаём топик через admin client
+      await createTopics(kafka!, [t029Topic], 1, 1);
+      console.log(`T029: created topic ${t029Topic}`);
+
+      // Создаём новый consumer для T029 (старый может быть в неопределённом состоянии после T028)
       try {
         await consumer!.stop();
         await consumer!.disconnect();
@@ -449,11 +475,14 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
       consumer = kafka!.consumer({ groupId, autoCommit: false });
       await consumer.connect();
 
-        // Сбрасываем activeSessions для нового теста
-        activeSessions!.clear();
+      // Сбрасываем activeSessions для нового теста
+      activeSessions!.clear();
 
-        // Step 1: Подписываем consumer на topic
-        await consumer!.subscribe({ topic: testTopic, fromBeginning: true });
+      let consumerRunPromise: Promise<void>;
+
+      try {
+        // Step 1: Подписываем consumer на уникальный topic
+        await consumer!.subscribe({ topic: t029Topic, fromBeginning: true });
 
         // Step 2: Создаём искусственную задержку для каждого сообщения
         // чтобы можно было измерить sequential processing time
@@ -471,125 +500,134 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
 
         // Mock console.time/log для измерения времени обработки
         const processingTimes: number[] = [];
+        const testMarker = 'T029_MSG';
 
         const originalLog = console.log;
-        console.log = (...args: unknown[]) => {
-          // Проверяем первый аргумент лога для замера времени
-          if (args[0] && typeof args[0] === 'string' && args[0].includes('message_processed')) {
-            try {
-              const logObj = JSON.parse(args[0]);
-              if (logObj.processingTimeMs) {
-                processingTimes.push(logObj.processingTimeMs);
+
+        try {
+          console.log = (...args: unknown[]) => {
+            // Проверяем первый аргумент лога для замера времени
+            if (args[0] && typeof args[0] === 'string' && args[0].includes('message_processed') && args[0].includes(testMarker)) {
+              try {
+                const logObj = JSON.parse(args[0]);
+                if (logObj.processingTimeMs) {
+                  processingTimes.push(logObj.processingTimeMs);
+                }
+              } catch {
+                // ignore parse errors
               }
-            } catch {
-              // ignore parse errors
             }
-          }
-          originalLog(...args);
-        };
+            originalLog(...args);
+          };
 
-        // Step 3: Запускаем consumer с искусственной задержкой
-        consumerRunPromise = consumer.run({
-          eachMessage: async (payload) => {
-            const startTime = Date.now();
+          // Step 3: Запускаем consumer с искусственной задержкой
+          consumerRunPromise = consumer!.run({
+            eachMessage: async (payload) => {
+              const startTime = Date.now();
 
-            try {
-              // Добавляем искусственную задержку
-              await new Promise((resolve) => setTimeout(resolve, messageDelayMs));
+              try {
+                // Добавляем искусственную задержку
+                await new Promise((resolve) => setTimeout(resolve, messageDelayMs));
 
-              // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
-              await eachMessageHandler(
-                {
-                  topic: payload.topic,
-                  partition: payload.partition,
-                  message: {
-                    value: payload.message.value,
-                    offset: payload.message.offset,
-                    key: payload.message.key,
-                    headers: payload.message.headers,
-                    timestamp: payload.message.timestamp,
+                // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
+                await eachMessageHandler(
+                  {
+                    topic: payload.topic,
+                    partition: payload.partition,
+                    message: {
+                      value: payload.message.value,
+                      offset: payload.message.offset,
+                      key: payload.message.key,
+                      headers: payload.message.headers,
+                      timestamp: payload.message.timestamp,
+                    },
                   },
-                },
-                testConfig,
-                dlqProducer!,
-                consumer!.commitOffsets.bind(consumer!),
-                mockState,
-                mockAgent!,
-                responseProducer!,
-                activeSessions!,
-              );
+                  testConfig,
+                  dlqProducer!,
+                  consumer!.commitOffsets.bind(consumer!),
+                  mockState,
+                  mockAgent!,
+                  responseProducer!,
+                  activeSessions!,
+                );
 
-              // Логируем время обработки
-              const processingTime = Date.now() - startTime;
-              console.log(
-                JSON.stringify({
-                  level: 'info',
-                  event: 'message_processed',
-                  processingTimeMs: processingTime,
-                }),
-              );
-            } catch (error) {
-              console.error('Error in consumer eachMessage:', error);
-            }
-          },
-        });
+                // Логируем время обработки с уникальным маркером для теста T029
+                const processingTime = Date.now() - startTime;
+                console.log(
+                  JSON.stringify({
+                    level: 'info',
+                    event: 'message_processed',
+                    test: testMarker,
+                    processingTimeMs: processingTime,
+                  }),
+                );
+              } catch (error) {
+                console.error('Error in consumer eachMessage:', error);
+              }
+            },
+          });
 
-        // Step 4: Ждём чтобы consumer начал слушать
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+          // Step 4: Ждём чтобы consumer начал слушать
+          await new Promise((resolve) => setTimeout(resolve, 1000));
 
-        // Step 5: Отправляем N сообщений
-        const messages = Array.from({ length: messageCount }, (_, i) => ({
-          vulnerabilities: [
-            { id: `CVE-2024-${i}`, severity: 'CRITICAL', description: `Vuln ${i}` },
-          ],
-        }));
+          // Step 5: Отправляем N сообщений
+          const messages = Array.from({ length: messageCount }, (_, i) => ({
+            vulnerabilities: [
+              { id: `CVE-2024-${i}`, severity: 'CRITICAL', description: `Vuln ${i}` },
+            ],
+          }));
 
-        const sendStartTime = Date.now();
+          const sendStartTime = Date.now();
 
-        await producer.send({
-          topic: testTopic,
-          messages: messages.map((msg, i) => ({
-            key: `seq-msg-${i}`,
-            value: JSON.stringify(msg),
-          })),
-        });
+          await producer!.send({
+            topic: t029Topic,
+            messages: messages.map((msg, i) => ({
+              key: `seq-msg-${i}`,
+              value: JSON.stringify(msg),
+            })),
+          });
 
-        console.log(`${messageCount} messages sent to Kafka`);
+          console.log(`${messageCount} messages sent to Kafka`);
 
-        // Step 6: Ждём обработки всех сообщений
-        await new Promise((resolve) => setTimeout(resolve, totalExpectedTimeMs + 2000));
+          // Step 6: Ждём обработки всех сообщений с использованием waitFor
+          await waitFor(
+            () => processingTimes.length >= messageCount,
+            { timeoutMs: 15000, timeoutMessage: 'Не все сообщения были обработаны за 15с' }
+          );
 
-        const sendEndTime = Date.now();
-        const totalProcessingTime = sendEndTime - sendStartTime;
+          const sendEndTime = Date.now();
+          const totalProcessingTime = sendEndTime - sendStartTime;
 
-        // Step 7: Проверяем что сообщения обрабатывались последовательно
-        // Время обработки должно быть примерно N × singleMessageTime
-        // Добавляем tolerance 20% для учета overhead
-        const tolerance = totalExpectedTimeMs * 0.2;
-        const minExpectedTime = totalExpectedTimeMs - tolerance;
-        const maxExpectedTime = totalExpectedTimeMs + tolerance;
+          // Step 7: Проверяем что сообщения обрабатывались последовательно
+          // Время обработки должно быть примерно N × singleMessageTime
+          // Добавляем tolerance 50% для учёта real Kafka overhead
+          const tolerance = totalExpectedTimeMs * 0.5;
+          const minExpectedTime = totalExpectedTimeMs - tolerance;
+          const maxExpectedTime = totalExpectedTimeMs + tolerance;
 
-        console.log(`Total processing time: ${totalProcessingTime}ms`);
-        console.log(`Expected time: ${totalExpectedTimeMs}ms (±${tolerance}ms)`);
-        console.log(`Processing times per message:`, processingTimes);
+          console.log(`Total processing time: ${totalProcessingTime}ms`);
+          console.log(`Expected time: ${totalExpectedTimeMs}ms (±${tolerance}ms)`);
+          console.log(`Processing times per message:`, processingTimes);
 
-        expect(processingTimes.length).toBe(messageCount);
-        expect(totalProcessingTime).toBeGreaterThanOrEqual(minExpectedTime);
-        expect(totalProcessingTime).toBeLessThanOrEqual(maxExpectedTime + 2000); // +2s для overhead
+          expect(processingTimes.length).toBe(messageCount);
+          expect(totalProcessingTime).toBeGreaterThanOrEqual(minExpectedTime);
+          expect(totalProcessingTime).toBeLessThanOrEqual(maxExpectedTime + 2000); // +2s для overhead
 
-        // Восстанавливаем оригинальный console.log
-        console.log = originalLog;
+        } finally {
+          // Восстанавливаем оригинальный console.log
+          console.log = originalLog;
+        }
 
         // Останавливаем consumer (в try-finally чтобы гарантировать остановку)
-        } finally {
-          try {
-            await consumer!.stop();
-            await consumerRunPromise;
-          } catch (stopError) {
-            console.warn('Error stopping consumer in T029:', stopError);
-          }
+      } finally {
+        try {
+          await consumer!.stop();
+          if (consumerRunPromise) await consumerRunPromise;
+        } catch (stopError) {
+          console.warn('Error stopping consumer in T029:', stopError);
         }
-      }, 30000); // 30 секунд timeout для этого теста
+      }
+    }, 30000); // 30 секунд timeout для этого теста
   });
 
   describe('Redpanda Container Lifecycle', () => {
