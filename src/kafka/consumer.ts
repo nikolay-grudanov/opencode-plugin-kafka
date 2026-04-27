@@ -263,9 +263,9 @@ export async function eachMessageHandler(
   dlqProducer: Producer,
   commitOffsets: CommitOffsetsFn,
   state: ConsumerState,
-  agent?: IOpenCodeAgent,
-  responseProducer?: Producer,
-  activeSessions?: Set<AbortController>,
+  agent: IOpenCodeAgent,
+  responseProducer: Producer,
+  activeSessions: Set<AbortController>,
 ): Promise<void> {
   // Проверяем состояние shutdown — если shutdown в процессе, не обрабатываем новые сообщения
   if (state.isShuttingDown) {
@@ -415,29 +415,8 @@ export async function eachMessageHandler(
     );
 
     // 7. Вызываем OpenCode агента (C2: AbortController для реальной отмены)
-    // Пропускаем вызов агента если agent не передан (backward compatibility для тестов)
-    if (!agent) {
-      console.log(
-        JSON.stringify({
-          level: 'warn',
-          event: 'agent_not_configured',
-          topic: payload.topic,
-          partition: payload.partition,
-          offset: payload.message.offset,
-          matchedRule: matchedRule.name,
-          timestamp: new Date().toISOString(),
-        }),
-      );
-      // Commit и возвращаем без вызова агента
-      logDlqRate(state);
-      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
-      return;
-    }
-
     const abortController = new AbortController();
-    if (activeSessions) {
-      activeSessions.add(abortController);
-    }
+    activeSessions.add(abortController);
 
     let agentResult: AgentResult;
     try {
@@ -446,17 +425,15 @@ export async function eachMessageHandler(
         signal: abortController.signal,
       });
     } finally {
-      if (activeSessions) {
-        activeSessions.delete(abortController); // гарантированная очистка во всех путях
-      }
+      activeSessions.delete(abortController); // гарантированная очистка во всех путях
     }
 
     // 8. Обрабатываем результат агента — отправляем response или DLQ
     const sessionId = agentResult.sessionId;
 
     if (agentResult.status === 'success') {
-      // Отправляем response если правило имеет responseTopic и responseProducer передан
-      if (matchedRule.responseTopic && responseProducer) {
+      // Отправляем response если правило имеет responseTopic
+      if (matchedRule.responseTopic) {
         await sendResponse(responseProducer, matchedRule.responseTopic, {
           messageKey: sessionId,
           sessionId,

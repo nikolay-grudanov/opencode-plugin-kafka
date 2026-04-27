@@ -442,6 +442,11 @@ describe('T010: Invalid JSON → DLQ', () => {
    */
   const INVALID_JSON_DLQ = 'test-invalid-json-dlq';
 
+  /**
+   * Сохраняет оригинальное значение KAFKA_DLQ_TOPIC для восстановления в afterEach.
+   */
+  let originalDlqTopic: string | undefined;
+
   beforeEach(async () => {
     dlqProducer = kafka!.producer();
     await dlqProducer.connect();
@@ -454,13 +459,14 @@ describe('T010: Invalid JSON → DLQ', () => {
     });
     await admin.disconnect();
 
-    // Устанавливаем env для использования изолированного DLQ
+    // Сохраняем оригинальное значение перед мутацией
+    originalDlqTopic = process.env.KAFKA_DLQ_TOPIC;
     process.env.KAFKA_DLQ_TOPIC = INVALID_JSON_DLQ;
   });
 
   afterEach(async () => {
-    // Восстанавливаем оригинальный DLQ топик
-    process.env.KAFKA_DLQ_TOPIC = TEST_DLQ_TOPIC;
+    // Восстанавливаем оригинальный DLQ топик через переменную
+    process.env.KAFKA_DLQ_TOPIC = originalDlqTopic;
 
     await dlqProducer?.disconnect();
   });
