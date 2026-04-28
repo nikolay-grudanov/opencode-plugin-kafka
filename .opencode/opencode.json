@@ -1,6 +1,10 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "instructions": [".opencode/rules/*.md"],
+  "permission":
+    { 
+        "graphify*": "allow"
+    },
   "agent": {
     "general": {
       "model": "minimax-coding-plan/MiniMax-M2.7",
@@ -130,6 +134,27 @@
         "opencode.ai",
         "--transport",
         "stdio"
+      ]
+    },
+    "mempalace": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "mempalace-mcp"
+      ]
+    },
+    "graphify": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "uv",
+        "run",
+        "--with",
+        "graphifyy[mcp]",
+        "python",
+        "-m",
+        "graphify.serve",
+        "/home/gna/workspase/projects/opencode-plugin-kafka/graphify-out/graph.json"
       ]
     }
   }
