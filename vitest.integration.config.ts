@@ -1,12 +1,12 @@
 import { defineConfig } from 'vitest/config';
 
-// Отдельная конфигурация для интеграционных тестов с реальным Redpanda
+// Конфигурация для интеграционных тестов (реальный Redpanda и mock-based тесты)
 // Запуск: npx vitest run --config vitest.integration.config.ts
 export default defineConfig({
   test: {
     globals: true,
-    // Только интеграционные тесты
-    include: ['tests/integration/**/*.integration.test.ts'],
+    // Все тесты из директории tests/integration/
+    include: ['tests/integration/**/*.test.ts'],
     // Увеличенные таймауты для container startup/shutdown
     testTimeout: 60000,
     hookTimeout: 60000,

@@ -1,7 +1,7 @@
 {
   "name": "opencode-plugin-kafka",
   "version": "0.0.1",
-  "type": "module",
+"type": "module",
   "scripts": {
     "build": "tsc",
     "check": "npm run lint && npm run test",

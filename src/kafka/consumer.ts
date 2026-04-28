@@ -265,7 +265,7 @@ export async function eachMessageHandler(
   state: ConsumerState,
   agent: IOpenCodeAgent,
   responseProducer: Producer,
-  activeSessions: Set<AbortController>,
+  activeSessions?: Set<AbortController>,
 ): Promise<void> {
   // Проверяем состояние shutdown — если shutdown в процессе, не обрабатываем новые сообщения
   if (state.isShuttingDown) {
@@ -416,7 +416,7 @@ export async function eachMessageHandler(
 
     // 7. Вызываем OpenCode агента (C2: AbortController для реальной отмены)
     const abortController = new AbortController();
-    activeSessions.add(abortController);
+    activeSessions?.add(abortController);
 
     let agentResult: AgentResult;
     try {
@@ -425,7 +425,7 @@ export async function eachMessageHandler(
         signal: abortController.signal,
       });
     } finally {
-      activeSessions.delete(abortController); // гарантированная очистка во всех путях
+      activeSessions?.delete(abortController); // гарантированная очистка во всех путях
     }
 
     // 8. Обрабатываем результат агента — отправляем response или DLQ

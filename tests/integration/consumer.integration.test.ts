@@ -295,6 +295,8 @@ describe('T007: Basic Message Production/Consumption', () => {
   });
 
   it('T007: должен обработать валидное JSON сообщение и закоммитить offset', async () => {
+    if (!containerAvailable) return;
+
     // Подготавливаем данные
     const rule: RuleV003 = {
       name: 'test-rule',
@@ -345,6 +347,8 @@ describe('T007: Basic Message Production/Consumption', () => {
 
 describe('T008: Container Cleanup', () => {
   it('T008: после завершения всех тестов контейнер должен быть остановлен', () => {
+    if (!containerAvailable) return;
+
     // Этот тест верифицирует что afterAll корректно останавливает контейнер
     // Проверяем что глобальный container null (он будет остановлен после всех тестов)
     // Но в данном describe контейнер еще жив
@@ -352,6 +356,8 @@ describe('T008: Container Cleanup', () => {
   });
 
   it('T008: все Kafka соединения должны быть закрыты', async () => {
+    if (!containerAvailable) return;
+
     // Создаем отдельные соединения и проверяем их закрытие
     const testProducer = kafka!.producer();
     await testProducer.connect();
@@ -375,6 +381,7 @@ describe('T009: Sequential Message Ordering', () => {
   let dlqProducer: Producer;
 
   beforeEach(async () => {
+    if (!containerAvailable) return;
     dlqProducer = kafka!.producer();
     await dlqProducer.connect();
   });
@@ -384,6 +391,8 @@ describe('T009: Sequential Message Ordering', () => {
   });
 
   it('T009: должен обрабатывать сообщения в порядке отправки', async () => {
+    if (!containerAvailable) return;
+
     const rule: RuleV003 = {
       name: 'order-rule',
       jsonPath: '$.order',
@@ -436,16 +445,46 @@ describe('T010: Invalid JSON → DLQ', () => {
   let producer: Producer;
   let dlqProducer: Producer;
 
+  /**
+   * Изолированный DLQ топик для T010.
+   * Используется чтобы избежать получения сообщений от других тестов.
+   */
+  const INVALID_JSON_DLQ = 'test-invalid-json-dlq';
+
+  /**
+   * Сохраняет оригинальное значение KAFKA_DLQ_TOPIC для восстановления в afterEach.
+   */
+  let originalDlqTopic: string | undefined;
+
   beforeEach(async () => {
+    if (!containerAvailable) return;
+
     dlqProducer = kafka!.producer();
     await dlqProducer.connect();
+
+    // Создаём изолированный DLQ топик для T010
+    const admin = kafka!.admin();
+    await admin.connect();
+    await admin.createTopics({
+      topics: [{ topic: INVALID_JSON_DLQ, numPartitions: 1, replicationFactor: 1 }],
+    });
+    await admin.disconnect();
+
+    // Сохраняем оригинальное значение перед мутацией
+    originalDlqTopic = process.env.KAFKA_DLQ_TOPIC;
+    process.env.KAFKA_DLQ_TOPIC = INVALID_JSON_DLQ;
   });
 
   afterEach(async () => {
+    // Восстанавливаем оригинальный DLQ топик через переменную
+    process.env.KAFKA_DLQ_TOPIC = originalDlqTopic;
+
     await dlqProducer?.disconnect();
   });
 
   it('T010: должен отправить invalid JSON сообщение в DLQ и закоммитить offset', async () => {
+    if (!containerAvailable) return;
+
     const rule: RuleV003 = {
       name: 'test-rule',
       jsonPath: '$.type',
@@ -486,7 +525,7 @@ describe('T010: Invalid JSON → DLQ', () => {
     // Читаем DLQ чтобы проверить структуру
     const dlqConsumer = kafka!.consumer({ groupId: generateGroupId('dlq-check') });
     await dlqConsumer.connect();
-    await dlqConsumer.subscribe({ topics: [TEST_DLQ_TOPIC], fromBeginning: true });
+    await dlqConsumer.subscribe({ topics: [INVALID_JSON_DLQ], fromBeginning: true });
 
     const dlqMessages: string[] = [];
 
@@ -530,6 +569,7 @@ describe('T011: Oversized Message → DLQ', () => {
   let dlqProducer: Producer;
 
   beforeEach(async () => {
+    if (!containerAvailable) return;
     dlqProducer = kafka!.producer();
     await dlqProducer.connect();
   });
@@ -539,6 +579,8 @@ describe('T011: Oversized Message → DLQ', () => {
   });
 
   it('T011: должен отправить oversized сообщение (>1MB) в DLQ', async () => {
+    if (!containerAvailable) return;
+
     const rule: RuleV003 = {
       name: 'test-rule',
       jsonPath: '$.type',
@@ -580,6 +622,7 @@ describe('T012: Unmatched Message — Skip Gracefully', () => {
   let dlqProducer: Producer;
 
   beforeEach(async () => {
+    if (!containerAvailable) return;
     dlqProducer = kafka!.producer();
     await dlqProducer.connect();
   });
@@ -589,6 +632,8 @@ describe('T012: Unmatched Message — Skip Gracefully', () => {
   });
 
   it('T012: должен пропустить сообщение без matching rule и закоммитить offset', async () => {
+    if (!containerAvailable) return;
+
     // Правило с JSONPath который не matchирует сообщение
     const rule: RuleV003 = {
       name: 'specific-rule',

@@ -27,8 +27,7 @@ npx vitest run tests/unit/routing.test.ts  # один тест-файл
 
 ## CI Pipeline (GitHub Actions)
 
-Порядок: lint → typecheck → test → build
-Интеграционные тесты НЕ в CI — требуют container runtime (Docker/Podman)
+Два параллельных job: `ci` (lint → typecheck → test → build) и `integration` (Redpanda через testcontainers)
 CI: ubuntu-latest, Node.js 20
 
 ## Coverage Threshold
@@ -132,7 +131,7 @@ Commands в `.opencode/command/`.
 ## Известные пробелы
 
 - `src/kafka/consumer.ts` (984 строки) — сложная Kafka API логика, тяжело покрыть unit-тестами без моков
-- Интеграционные тесты требуют container runtime — недоступны в текущем CI
+- Интеграционные тесты запускаются в отдельном CI job `integration` с ubuntu-latest (Docker доступен)
 - Consumer integration tests нуждаются в real Redpanda для осмысленного coverage
 
 ## Принцип: Баги решаются сразу
