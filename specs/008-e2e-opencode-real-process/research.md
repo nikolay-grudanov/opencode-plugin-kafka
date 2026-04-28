@@ -18,17 +18,26 @@
 
 **Контекст**: `OpenCodeAgentAdapter` принимает `SDKClient = { session: SessionsAPI }`. SDKClient — интерфейс с методами create/prompt/abort/delete/messages. Для продакшена SDK клиент инжектируется через PluginContext.
 
-**Decision**: Создать HTTP-обёртку `createSDKClient({ baseURL })`, реализующую SessionsAPI через fetch к `opencode serve` HTTP API.
+**Decision**: Создать SDK клиент через `new Opencode({ baseURL })` из `@opencode-ai/sdk`.
 
 **Rationale**: 
-- `opencode serve` expose HTTP API на заданном порту
-- SDKClient интерфейс известен (из `src/types/opencode-sdk.d.ts`)
-- HTTP-обёртка даёт полный контроль над base URL и error handling
-- Не зависит от внутренних деталей `opencode` npm-пакета
+- SDK официально поддерживает custom baseURL через конструктор
+- Не нужно писать HTTP wrapper — SDK уже реализует SessionsAPI
+- Импорт: `import { Opencode } from '@opencode-ai/sdk'`
+- Пример: `const client = new Opencode({ baseURL: 'http://localhost:3001' })`
+
+**Implementation:**
+```typescript
+import { Opencode } from '@opencode-ai/sdk';
+
+const sdk = new Opencode({
+  baseURL: opts.baseURL,
+  timeout: 60000,
+});
+```
 
 **Alternatives considered**:
-- Использовать `opencode` SDK с baseURL — нет гарантий, что SDK поддерживает custom URL
-- Мокать SDKClient — отвергнуто: цель E2E — протестировать реальный путь
+- HTTP wrapper — отвергнуто: SDK поддерживает baseURL, нет нужды дублировать
 
 ## R3: Consumer lifecycle management
 

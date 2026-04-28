@@ -10,7 +10,7 @@
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Можно выполнять параллельно (разные файлы, нет зависимостей)
-- **[Story]**: Принадлежность к User Story (US1–US6)
+- **[Story]**: Принадлежность к User Story (US1–US8)
 - Все пути указаны от корня репозитория
 
 ---
@@ -23,6 +23,7 @@
 - [ ] T002 [P] Add "test:e2e" script to package.json — `"test:e2e": "vitest run --config vitest.e2e.config.ts"`
 - [ ] T003 [P] Create e2e-responder agent system prompt in .opencode/agents/e2e-responder.md — instructions: answer briefly, no tools, respond with minimal text
 - [ ] T004 [P] Add e2e-responder agent entry to .opencode/opencode.json — mode: subagent, model: lemonade, temperature: 0.1, permission: deny all, prompt: {file:agents/e2e-responder.md}
+- [ ] T004a [P] Update quickstart.md with E2E test run instructions — document prerequisites (Lemonade, Docker), commands (`npm run test:e2e`), expected output, troubleshooting tips
 
 ---
 
@@ -35,7 +36,9 @@
 - [ ] T005 Implement startRedpanda/stopRedpanda in tests/e2e/helpers/redpandaContainer.ts — REAL Redpanda через @testcontainers/redpanda, вернуть brokers array, cleanup через container.stop()
 - [ ] T006 [P] Implement spawnOpenCodeServe/OpenCodeProcessHandle in tests/e2e/helpers/opencodeProcess.ts — spawn child process, port pre-check (error if busy), health polling GET /health every 500ms, 30s startup timeout, kill() method: SIGTERM → 5s → SIGKILL
 - [ ] T007 [P] Implement createTopics/produceMessage/consumeOneMessage in tests/e2e/helpers/kafkaUtils.ts — admin client for topics, producer, consumer with fromBeginning: false and unique group ID per call, timeout-based consume
-- [ ] T008 [P] Implement createSDKClient in tests/e2e/helpers/sdkClient.ts — HTTP fetch wrapper implementing SessionsAPI: session.create() → POST /sessions, session.prompt() → POST /sessions/{id}/prompt, session.abort() → POST /sessions/{id}/abort, session.delete() → DELETE /sessions/{id}
+- [ ] T008 [P] Implement createSDKClient in tests/e2e/helpers/sdkClient.ts — создать SDK клиент через `@opencode-ai/sdk` с custom baseURL, адаптировать к SDKClient интерфейсу
+- [ ] T008a [P] Add @opencode-ai/sdk to dependencies in package.json — verify or add `"@opencode-ai/sdk": "^1.14.28"`
+- [ ] T008b [P] Implement timing helper in tests/e2e/helpers/timing.ts — startTimer(label) returns stop function, logs elapsed ms to stdout with [e2e-timing] prefix, used in beforeAll/afterAll for infrastructure timing and in tests for execution timing
 - [ ] T009 Implement runPlugin/PluginRunnerHandle in tests/e2e/helpers/pluginRunner.ts — set process.env from params, call startConsumer(config, agent), return handle with stop() calling performGracefulShutdown, 10s shutdown timeout, swallow errors on cleanup
 
 **Checkpoint**: Все helper-модули готовы → можно писать E2E-тесты
@@ -48,7 +51,7 @@
 
 **Independent Test**: Отправить сообщение в input-топик, проверить responseTopic — status: success, непустой response, заполненные sessionId и ruleName
 
-- [ ] T010 [US1] Create tests/e2e/consumer.e2e.test.ts with beforeAll/afterAll skeleton and T-E2E-001 happy path test — beforeAll: start Redpanda, spawn opencode serve, create topics; afterAll: cleanup; test: produce { task: "What is 2+2?" }, consume responseTopic, assert status=success, response non-empty, sessionId set, ruleName=e2e-echo-rule
+- [ ] T010 [US1] Create tests/e2e/consumer.e2e.test.ts with beforeAll/afterAll skeleton and T-E2E-001 happy path test — beforeAll: start Redpanda, spawn opencode serve, create topics, snapshot hash of ~/.config/opencode/opencode.json; afterAll: cleanup; test: produce { task: "What is 2+2?" }, consume responseTopic, assert status=success, response non-empty, sessionId set, ruleName=e2e-echo-rule; in afterAll: snapshot hash of ~/.config/opencode/opencode.json before/after — assert unchanged (FR-009)
 
 **Checkpoint**: Happy Path работает — минимальный жизнеспособный E2E-тест пройден
 
@@ -114,13 +117,37 @@
 
 ---
 
-## Phase 9: CI & Polish
+## Phase 8a: User Story 7 — Invalid Kafka message: consumer не крашится (Priority: P1)
+
+**Goal**: Malformed JSON в Kafka-сообщении не крашит consumer, а корректно отправляется в DLQ
+
+**Independent Test**: Отправить невалидный JSON, проверить DLQ и что consumer продолжает работу
+
+- [ ] T016a [US7] Add T-E2E-007 invalid JSON→DLQ test to tests/e2e/consumer.e2e.test.ts — test: produce "not a json" (raw string) to input topic, consume DLQ, assert error contains "parse" or "JSON"; produce valid message after, assert success — consumer continues
+
+**Checkpoint**: Resiliency подтверждён для невалидных данных — consumer не падает на malformed JSON
+
+---
+
+## Phase 8b: User Story 8 — Consumer recovery после ошибки (Priority: P2)
+
+**Goal**: Consumer корректно обрабатывает серию ошибок и продолжает работу — не теряет offset
+
+**Independent Test**: Отправить invalid→valid→invalid→valid, проверить что все валидные обработаны, все невалидные в DLQ
+
+- [ ] T016b [US8] Add T-E2E-008 consumer recovery test to tests/e2e/consumer.e2e.test.ts — test: send series of 4 messages (invalid→valid→invalid→valid), verify 2 valid processed with success, 2 invalid in DLQ, consumer alive
+
+**Checkpoint**: No-State Consumer + Resiliency подтверждены — consumer не накапливает состояние при ошибках
+
+---
+
+## Phase 10: CI & Polish
 
 **Purpose**: CI-интеграция и финальная валидация
 
 - [ ] T016 [P] Create GitHub Actions E2E workflow in .github/workflows/e2e.yml — trigger: workflow_dispatch only, self-hosted runner, steps: checkout → setup node 20 → npm ci → npm run test:e2e
 - [ ] T017 [P] Verify npm run check does NOT include E2E tests — run npm run check, confirm no e2e tests executed
-- [ ] T018 Run full E2E suite via `npm run test:e2e` and validate against quickstart.md — confirm all 6 tests pass, no zombie processes, cleanup works
+- [ ] T018 Run full E2E suite via `npm run test:e2e` and validate against quickstart.md — confirm all 8 tests pass, no zombie processes, cleanup works
 
 ---
 
@@ -130,11 +157,15 @@
 
 - **Setup (Phase 1)**: No dependencies — start immediately
 - **Foundational (Phase 2)**: Depends on Phase 1 (config + agent ready) — BLOCKS all user stories
-- **User Stories (Phase 3–8)**: All depend on Phase 2 completion
+  - Phase 1: T002, T003, T004, T004a can run in parallel (different files)
+- **Foundational (Phase 2)**: Depends on Phase 1 (config + agent ready) — BLOCKS all user stories
+- **User Stories (Phase 3–8, 8a, 8b)**: All depend on Phase 2 completion
   - US1 (Phase 3) must be first — creates test file skeleton
   - US2, US4 (Phase 4–5) can proceed after US1 (same file, sequential adds)
   - US3, US5, US6 (Phase 6–8) follow in priority order
-- **Polish (Phase 9)**: Depends on all user stories complete
+  - US7 (Phase 8a) after US6 — needs consumer resilience
+  - US8 (Phase 8b) after US7 — needs consumer alive
+- **Polish (Phase 10)**: Depends on all user stories complete
 
 ### User Story Dependencies
 
@@ -144,17 +175,19 @@
 - **US3 (P2)**: After US1 — adds test to existing file
 - **US5 (P2)**: After US1 — adds test to existing file
 - **US6 (P2)**: After US1 — adds test to existing file
+- **US7 (P1)**: After US6 — adds invalid JSON test, needs resilience
+- **US8 (P2)**: After US7 — adds recovery test, needs consumer alive
 
 ### Within Each User Story
 
-- Helper modules → test file creation (US1) → individual tests (US2–US6)
+- Helper modules → test file creation (US1) → individual tests (US2–US8)
 - All tests in same file → sequential, NOT parallel
 
 ### Parallel Opportunities
 
 - Phase 1: T002, T003, T004 can run in parallel (different files)
 - Phase 2: T006, T007, T008 can run in parallel after T005 (different files)
-- Phase 9: T016, T017 can run in parallel (different files)
+- Phase 10: T016, T017 can run in parallel (different files)
 
 ---
 
@@ -189,13 +222,15 @@ Task: "Implement createSDKClient in tests/e2e/helpers/sdkClient.ts"
 5. Add US3 (Field extraction) → Run → Prompt assembly confirmed ✅
 6. Add US5 (Minimal response) → Run → Edge case confirmed ✅
 7. Add US6 (Fire-and-forget) → Run → Optional response confirmed ✅
-8. Phase 9 (CI + Polish) → Production-ready ✅
+8. Add US7 (Invalid JSON) → Run → Malformed data resilience confirmed ✅
+9. Add US8 (Recovery) → Run → No-state consumer confirmed ✅
+10. Phase 10 (CI + Polish) → Production-ready ✅
 
 ### Execution Order for Single Developer
 
 ```
-T001 → T002|T003|T004 (parallel) → T005 → T006|T007|T008 (parallel) → T009
-→ T010 → T011 → T012 → T013 → T014 → T015 → T016|T017 (parallel) → T018
+T001 → T002|T003|T004|T004a (parallel) → T005 → T006|T007|T008 (parallel) → T008a|T008b → T009
+→ T010 → T011 → T012 → T013 → T014 → T015 → T016a → T016b → T016|T017 (parallel) → T018
 ```
 
 ---

@@ -59,6 +59,8 @@
 
 **Independent Test**: Установить заведомо малый timeoutMs (100ms), отправить сообщение и проверить, что оно появилось в DLQ с описанием ошибки timeout.
 
+**Timeout Simulation Strategy**: Используется заведомо малый `timeoutMs: 100` с реальным LLM через Lemonade. LLM физически не может ответить за 100ms, что гарантирует timeout. Не требуется mock-агент — это тестирует реальный путь timeout handling в consumer.
+
 **Acceptance Scenarios**:
 
 1. **Given** правило с `timeoutMs: 100` (заведомо мало для реального LLM), **When** отправляется сообщение с полем `task`, **Then** сообщение появляется в DLQ-топике с `originalTopic: 'e2e-input'` и `error`, содержащим "timeout"
@@ -95,6 +97,35 @@
 
 ---
 
+### User Story 7 — Invalid Kafka message: consumer не крашится (Priority: P1)
+
+Как разработчик, я хочу убедиться, что malformed JSON в Kafka-сообщении не крашит consumer, а корректно отправляется в DLQ с описанием ошибки parse.
+
+**Why this priority**: Resiliency — конституционный принцип #3. E2E-подтверждение что consumer не падает на невалидных данных — критично.
+
+**Independent Test**: Отправить невалидный JSON (не-JSON строку) в input-топик, проверить что consumer продолжает работу и DLQ содержит ошибку parse.
+
+**Acceptance Scenarios**:
+
+1. **Given** запущены Redpanda и opencode serve, **When** в input-топик отправляется невалидный JSON (например, "not a json"), **Then** сообщение попадает в DLQ с error содержащим "parse" или "JSON", consumer продолжает работу
+2. **Given** тот же сценарий, **When** после невалидного сообщения отправляется валидное, **Then** валидное сообщение обрабатывается корректно — consumer не остановился
+
+---
+
+### User Story 8 — Consumer recovery после ошибки (Priority: P2)
+
+Как разработчик, я хочу убедиться, что consumer корректно обрабатывает серию ошибок и продолжает работу — не теряет offset, не крашится.
+
+**Why this priority**: Подтверждает Resiliency (III) и No-State Consumer (IV) — consumer не накапливает состояние при ошибках.
+
+**Independent Test**: Отправить серию: невалидное → валидное → невалидное → валидное, проверить что все валидные обработаны, все невалидные в DLQ.
+
+**Acceptance Scenarios**:
+
+1. **Given** запущены Redpanda и opencode serve, **When** отправляется серия из 4 сообщений (invalid→valid→invalid→valid), **Then** 2 валидных обработаны с success, 2 невалидные в DLQ, consumer продолжает работу
+
+---
+
 ### Edge Cases
 
 - Что происходит, если порт opencode serve уже занят? → Тест должен упасть с понятной ошибкой до начала (не зависать)
@@ -102,6 +133,16 @@
 - Что происходит, если Redpanda контейнер не стартует? → `beforeAll` падает с ошибкой testcontainers
 - Что происходит, если агент отвечает быстрее timeout? → Ответ корректно попадает в responseTopic
 - Что происходит при конкурентных сообщениях? → Consumer обрабатывает последовательно (concurrency: 1)
+- Invalid JSONPath expression в правиле → невалидный route → silent skip или error handling
+- Empty LLM response ("") → не должен падать в DLQ
+- Что происходит при DLQ message с невалидной схемой? → DLQ envelope должен содержать минимум: originalTopic, error, timestamp, originalMessage
+- Что происходит если consumer перезапускается между сообщениями? → Offset сохраняется, обработанные сообщения не дублируются (consumer group commitment)
+- Что происходит при очень большом сообщении (>1MB)? → Consumer отклоняет с ошибкой размера, сообщение не теряется
+- Что происходит если responseTopic не существует? → Producer падает с TopicNotFoundException, ошибка логируется, consumer продолжает
+- Что происходит при null message value (tombstone)? → Consumer пропускает tombstone, не вызывает агента
+- Что происходит если Lemonade отвечает с HTTP 500? → OpenCodeAgentAdapter возвращает error, сообщение попадает в DLQ
+- Что происходит при concurrent produce из теста? → Consumer обрабатывает последовательно (concurrency: 1), порядок сохраняется
+- Что происходит если opencode serve упал mid-processing? → Agent invoke падает с network error, сообщение попадает в DLQ, consumer продолжает
 
 ## Requirements *(mandatory)*
 
@@ -115,10 +156,11 @@
 - **FR-006**: Consumer для проверки результатов ДОЛЖЕН читать только новые сообщения (`fromBeginning: false`)
 - **FR-007**: В проектном конфиге `.opencode/opencode.json` ДОЛЖЕН быть добавлен агент `e2e-responder` с model lemonade и ограниченными permissions
 - **FR-008**: E2E-тесты НЕ ДОЛЖНЫ запускаться в CI на каждый PR — только вру��ную (`npm run test:e2e`) или через `workflow_dispatch`
-- **FR-009**: Глобальный конфиг пользователя (`~/.config/opencode/opencode.json`) НЕ ДОЛЖЕН модифицироваться тестами
+- **FR-009**: Глобальный конфиг пользователя (`~/.config/opencode/opencode.json`) НЕ ДОЛЖЕН модифицироваться тестами. Тест ДОЛЖЕН проверять это через snapshot: сохранить хэш файла до и после тестового прогона — хэши должны совпадать
 - **FR-010**: Тестовая инфраструктура ДОЛЖНА создавать все необходимые Kafka-топики до начала тестов
 - **FR-011**: `afterAll` ДОЛЖЕН безусловно вызывать cleanup (kill opencode serve, stop Redpanda) — даже если тесты упали
 - **FR-012**: E2E-тесты ДОЛЖНЫ работать в sequential режиме (single fork) — один процесс, одна очередь
+- **FR-013**: Consumer ДОЛЖЕН корректно обрабатывать невалидный JSON и отправлять в DLQ с описанием ошибки
 
 ### Key Entities
 
@@ -132,11 +174,11 @@
 
 ### Measurable Outcomes
 
-- **SC-001**: Все 6 E2E-тестов (T-E2E-001..006) проходят успешно при наличии работающего Lemonade и Docker/Podman
+- **SC-001**: Все 8 E2E-тестов (T-E2E-001..008) проходят успешно при наличии работающего Lemonade и Docker/Podman
 - **SC-002**: Каждый тест завершается в пределах своего таймаута (базовый 90s, timeout-тест 60s)
-- **SC-003**: Процесс `opencode serve` гарантированно останавливается после завершения тестов — нет zombie-процессов
+- **SC-003**: Процесс `opencode serve` гарантированно останавливается после завершения тестов — `afterAll` проверяет через `lsof -i :PORT` или PID check что порт свободен. При обнаружении zombie — force kill через `SIGKILL` и логирование в stderr
 - **SC-004**: Тесты можно запустить одной командой (`npm run test:e2e`) без дополнительной настройки, при наличии предустановленных Lemonade и Docker
-- **SC-005**: Результаты тестов воспроизводимы — повторный прогон даёт тот же outcome при неизменных предусловиях
+- **SC-005**: Результаты тестов воспроизводимы — 3 последовательных прогона дают одинаковый outcome (pass/fail) для каждого теста. Допускается вариация в тексте LLM-ответа, но не в статусе (success/error/timeout)
 - **SC-006**: Команда `npm run test:e2e` не влияет на существующие тесты (`npm test`, `npm run test:integration`) — отдельный Vitest-конфиг
 
 ## Assumptions

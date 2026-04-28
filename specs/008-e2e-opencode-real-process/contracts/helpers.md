@@ -25,12 +25,14 @@
 **Side Effects:**
 - Spawns child process
 - Pipes stderr to process.stderr with `[opencode-serve]` prefix
+- Log PID to stdout for zombie detection: `[opencode-serve] PID: {pid}`
 
 ### `OpenCodeProcessHandle`
 
 ```typescript
 interface OpenCodeProcessHandle {
   readonly baseURL: string;       // e.g., "http://localhost:3001"
+  readonly pid: number;            // Child process PID for zombie detection
   kill(): Promise<void>;          // SIGTERM → 5s → SIGKILL
 }
 ```
@@ -141,6 +143,8 @@ interface PluginRunnerHandle {
 **stop() behavior:**
 - Вызывает shutdown механизм consumer
 - Ждёт завершения до 10 секунд
+- Log PID перед shutdown для отладки zombie-процессов
+- Force kill через process.kill(pid, 'SIGKILL') если shutdown не завершён за 10s
 - Не бросает ошибки при shutdown failure (log only)
 
 ---
@@ -158,8 +162,16 @@ interface PluginRunnerHandle {
 
 **Returns:** `SDKClient` (реализует интерфейс из `src/types/opencode-sdk.d.ts`)
 
-**Implementation:** HTTP fetch wrapper, реализующий `SessionsAPI`:
-- `session.create()` → `POST ${baseURL}/sessions`
-- `session.prompt()` → `POST ${baseURL}/sessions/{id}/prompt`
-- `session.abort()` → `POST ${baseURL}/sessions/{id}/abort`
-- `session.delete()` → `DELETE ${baseURL}/sessions/{id}`
+**Implementation:**
+```typescript
+import { Opencode } from '@opencode-ai/sdk';
+
+const sdk = new Opencode({
+  baseURL: opts.baseURL,
+  timeout: 60000,
+});
+
+// Адаптация к SDKClient интерфейсу:
+// SDK экспортирует все методы SessionsAPI напрямую
+// return { session: sdk } // или direct wrap если нужно
+```
