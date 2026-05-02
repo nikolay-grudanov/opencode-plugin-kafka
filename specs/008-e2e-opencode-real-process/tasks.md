@@ -99,7 +99,7 @@
 
 **Independent Test**: Отправить промпт "Reply with the single word ok", проверить success + пустой DLQ
 
-- [ ] T014 [US5] Add T-E2E-005 minimal response test to tests/e2e/consumer.e2e.test.ts — test: produce message with prompt "Reply with the single word ok", consume responseTopic assert status=success, response non-empty string; consume DLQ assert null (no false positives)
+- [x] T014 [US5] Add T-E2E-005 minimal response test to tests/e2e/consumer.e2e.test.ts — test: produce message with prompt "Reply with the single word ok", consume responseTopic assert status=success, response non-empty string; consume DLQ assert null (no false positives)
 
 **Checkpoint**: Короткие ответы корректно обрабатываются — нет ложных DLQ
 

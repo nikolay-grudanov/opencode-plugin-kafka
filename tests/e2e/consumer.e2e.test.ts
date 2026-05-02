@@ -64,6 +64,11 @@ describe('Kafka consumer E2E', () => {
   const EXTRACTION_INPUT_TOPIC = 'e2e-extraction-input';
   const EXTRACTION_RESPONSE_TOPIC = 'e2e-extraction-response';
 
+  // Minimal response test topics
+  const MINIMAL_INPUT_TOPIC = 'e2e-minimal-input';
+  const MINIMAL_RESPONSE_TOPIC = 'e2e-minimal-response';
+  const MINIMAL_DLQ_TOPIC = 'e2e-minimal-input-dlq';
+
   const pluginConfig: PluginConfigV003 = {
     topics: [INPUT_TOPIC],
     rules: [
@@ -212,6 +217,22 @@ describe('Kafka consumer E2E', () => {
         agentId: AGENT_ID,
         responseTopic: EXTRACTION_RESPONSE_TOPIC,
         timeoutMs: 60_000,
+        concurrency: 1,
+      },
+    ],
+  };
+
+  // Minimal response plugin config для T-E2E-005
+  const minimalPluginConfig: PluginConfigV003 = {
+    topics: [MINIMAL_INPUT_TOPIC],
+    rules: [
+      {
+        name: 'e2e-minimal-rule',
+        jsonPath: '$.task',
+        promptTemplate: '${$.task}',
+        agentId: AGENT_ID,
+        responseTopic: MINIMAL_RESPONSE_TOPIC,
+        timeoutMs: 30_000,
         concurrency: 1,
       },
     ],
@@ -388,6 +409,70 @@ describe('Kafka consumer E2E', () => {
       expect(response.agentId).toBe(AGENT_ID);
 
       // 8. Stop plugin
+      await pluginHandle.stop();
+    },
+    120_000
+  );
+
+  test(
+    'T-E2E-005: minimal response — not DLQ',
+    async function () {
+      // 1. Create minimal response topics
+      await createTopics(brokers, [
+        MINIMAL_INPUT_TOPIC,
+        MINIMAL_RESPONSE_TOPIC,
+        MINIMAL_DLQ_TOPIC,
+      ]);
+
+      // 2. Create SDK client and agent adapter
+      const sdkClient = createSDKClient({ baseURL: opencodeHandle.baseURL });
+      const agent = new OpenCodeAgentAdapter(sdkClient);
+
+      // 3. Start plugin consumer with minimal config
+      const brokersString = brokers.join(',');
+      const connection = {
+        brokers: brokersString,
+        clientId: 'e2e-minimal-client',
+        groupId: `e2e-minimal-group-${Date.now()}`,
+        dlqTopic: MINIMAL_DLQ_TOPIC,
+      };
+      const pluginHandle = await runPlugin(minimalPluginConfig, agent, connection);
+
+      // 4. Give consumer time to connect and subscribe
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+
+      // 5. Produce minimal prompt: single word response
+      const minimalMessage = { task: 'Reply with the single word ok' };
+      await produceMessage(brokers, MINIMAL_INPUT_TOPIC, {
+        value: JSON.stringify(minimalMessage),
+      });
+
+      // 6. Consume response from responseTopic (should be success)
+      const responseMessage = await consumeOneMessage(
+        brokers,
+        MINIMAL_RESPONSE_TOPIC,
+        90_000
+      );
+      expect(responseMessage).not.toBeNull();
+
+      // 7. Parse and assert response is success
+      const response = JSON.parse(responseMessage!.value!.toString());
+      expect(response.status).toBe('success');
+      expect(response.response).toBeDefined();
+      expect(typeof response.response).toBe('string');
+      expect(response.response.length).toBeGreaterThan(0);
+      expect(response.ruleName).toBe('e2e-minimal-rule');
+      expect(response.agentId).toBe(AGENT_ID);
+
+      // 8. Verify no DLQ entry (short timeout to avoid long wait)
+      const dlqMessage = await consumeOneMessage(
+        brokers,
+        MINIMAL_DLQ_TOPIC,
+        5_000
+      );
+      expect(dlqMessage).toBeNull(); // Minimal response should NOT go to DLQ
+
+      // 9. Stop plugin
       await pluginHandle.stop();
     },
     120_000
