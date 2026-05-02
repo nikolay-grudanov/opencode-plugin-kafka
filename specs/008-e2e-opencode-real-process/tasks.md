@@ -63,7 +63,7 @@
 
 **Independent Test**: Отправить 2 сообщения (matching и non-matching), проверить что только matching вызвало ответ в responseTopic
 
-- [ ] T011 [US2] Add T-E2E-002 routing match/skip test to tests/e2e/consumer.e2e.test.ts — test: send { type: "notification", content: "hello" } → no response in responseTopic (skip); send { type: "question", content: "What color is the sky?" } → response with status=success
+- [x] T011 [US2] Add T-E2E-002 routing match/skip test to tests/e2e/consumer.e2e.test.ts — test: send { type: "notification", content: "hello" } → no response in responseTopic (skip); send { type: "question", content: "What color is the sky?" } → response with status=success
 
 **Checkpoint**: Routing подтверждён в реальном окружении — Domain Isolation проверен E2E
 
