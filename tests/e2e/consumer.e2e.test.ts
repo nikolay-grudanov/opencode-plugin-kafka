@@ -5,6 +5,10 @@
  * T-E2E-002: Routing — JSONPath match/skip
  * T-E2E-003: JSONPath field extraction
  * T-E2E-004: Agent timeout → DLQ
+ * T-E2E-005: Minimal response — not DLQ
+ * T-E2E-006: fire-and-forget — no responseTopic
+ * T-E2E-007: invalid JSON → DLQ
+ * T-E2E-008: consumer recovery — series of errors
  */
 import { describe, test, beforeAll, afterAll, expect } from 'vitest';
 import {
@@ -16,6 +20,7 @@ import {
   createTopics,
   produceMessage,
   consumeOneMessage,
+  consumeMessages,
 } from './helpers/kafkaUtils.js';
 import { runPlugin } from './helpers/pluginRunner.js';
 import { createSDKClient } from './helpers/sdkClient.js';
@@ -68,6 +73,20 @@ describe('Kafka consumer E2E', () => {
   const MINIMAL_INPUT_TOPIC = 'e2e-minimal-input';
   const MINIMAL_RESPONSE_TOPIC = 'e2e-minimal-response';
   const MINIMAL_DLQ_TOPIC = 'e2e-minimal-input-dlq';
+
+  // Fire-and-forget test topics
+  const FIREFORGET_INPUT_TOPIC = 'e2e-fireforget-input';
+  const FIREFORGET_DLQ_TOPIC = 'e2e-fireforget-input-dlq';
+
+  // Invalid JSON test topics
+  const INVALID_INPUT_TOPIC = 'e2e-invalid-input';
+  const INVALID_RESPONSE_TOPIC = 'e2e-invalid-response';
+  const INVALID_DLQ_TOPIC = 'e2e-invalid-input-dlq';
+
+  // Recovery test topics
+  const RECOVERY_INPUT_TOPIC = 'e2e-recovery-input';
+  const RECOVERY_RESPONSE_TOPIC = 'e2e-recovery-response';
+  const RECOVERY_DLQ_TOPIC = 'e2e-recovery-input-dlq';
 
   const pluginConfig: PluginConfigV003 = {
     topics: [INPUT_TOPIC],
@@ -232,6 +251,22 @@ describe('Kafka consumer E2E', () => {
         promptTemplate: '${$.task}',
         agentId: AGENT_ID,
         responseTopic: MINIMAL_RESPONSE_TOPIC,
+        timeoutMs: 30_000,
+        concurrency: 1,
+      },
+    ],
+  };
+
+  // Fire-and-forget plugin config для T-E2E-006 (rule WITHOUT responseTopic)
+  const fireforgetPluginConfig: PluginConfigV003 = {
+    topics: [FIREFORGET_INPUT_TOPIC],
+    rules: [
+      {
+        name: 'e2e-fireforget-rule',
+        jsonPath: '$.task',
+        promptTemplate: '{{value}}',
+        agentId: AGENT_ID,
+        // NO responseTopic — fire-and-forget mode
         timeoutMs: 30_000,
         concurrency: 1,
       },
@@ -471,6 +506,224 @@ describe('Kafka consumer E2E', () => {
         5_000
       );
       expect(dlqMessage).toBeNull(); // Minimal response should NOT go to DLQ
+
+      // 9. Stop plugin
+      await pluginHandle.stop();
+    },
+    120_000
+  );
+
+  test(
+    'T-E2E-006: fire-and-forget — no responseTopic',
+    async function () {
+      // 1. Create fire-and-forget topics
+      await createTopics(brokers, [
+        FIREFORGET_INPUT_TOPIC,
+        FIREFORGET_DLQ_TOPIC,
+      ]);
+
+      // 2. Create SDK client and agent adapter
+      const sdkClient = createSDKClient({ baseURL: opencodeHandle.baseURL });
+      const agent = new OpenCodeAgentAdapter(sdkClient);
+
+      // 3. Start plugin consumer with fire-and-forget config (no responseTopic)
+      const brokersString = brokers.join(',');
+      const connection = {
+        brokers: brokersString,
+        clientId: 'e2e-fireforget-client',
+        groupId: `e2e-fireforget-group-${Date.now()}`,
+        dlqTopic: FIREFORGET_DLQ_TOPIC,
+      };
+      const pluginHandle = await runPlugin(fireforgetPluginConfig, agent, connection);
+
+      // 4. Give consumer time to connect and subscribe
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+
+      // 5. Produce message — should be processed but no response sent (fire-and-forget)
+      await produceMessage(brokers, FIREFORGET_INPUT_TOPIC, {
+        value: JSON.stringify({ task: 'This is fire and forget' }),
+      });
+
+      // 6. Wait for processing to complete
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+
+      // 7. Verify DLQ is empty — agent succeeded, no error
+      const dlqMsg = await consumeOneMessage(brokers, FIREFORGET_DLQ_TOPIC, 5_000);
+      expect(dlqMsg).toBeNull(); // Fire-and-forget success → no DLQ entry
+
+      // 8. Stop plugin
+      await pluginHandle.stop();
+    },
+    120_000
+  );
+
+  test(
+    'T-E2E-007: invalid JSON → DLQ',
+    async function () {
+      // 1. Create invalid JSON test topics
+      await createTopics(brokers, [
+        INVALID_INPUT_TOPIC,
+        INVALID_RESPONSE_TOPIC,
+        INVALID_DLQ_TOPIC,
+      ]);
+
+      // 2. Create SDK client and agent adapter
+      const sdkClient = createSDKClient({ baseURL: opencodeHandle.baseURL });
+      const agent = new OpenCodeAgentAdapter(sdkClient);
+
+      // 3. Start plugin consumer
+      const brokersString = brokers.join(',');
+      const connection = {
+        brokers: brokersString,
+        clientId: 'e2e-invalid-client',
+        groupId: `e2e-invalid-group-${Date.now()}`,
+        dlqTopic: INVALID_DLQ_TOPIC,
+      };
+
+      const invalidConfig: PluginConfigV003 = {
+        topics: [INVALID_INPUT_TOPIC],
+        rules: [
+          {
+            name: 'e2e-invalid-rule',
+            jsonPath: '$.task',
+            promptTemplate: '{{value}}',
+            agentId: AGENT_ID,
+            responseTopic: INVALID_RESPONSE_TOPIC,
+            timeoutMs: 30_000,
+            concurrency: 1,
+          },
+        ],
+      };
+
+      const pluginHandle = await runPlugin(invalidConfig, agent, connection);
+
+      // 4. Give consumer time to connect and subscribe
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+
+      // 5. Send invalid JSON (raw string, not parseable)
+      await produceMessage(brokers, INVALID_INPUT_TOPIC, {
+        value: 'not a json',
+      });
+
+      // 6. Consume from DLQ — should contain parse error
+      const dlqMessage = await consumeOneMessage(brokers, INVALID_DLQ_TOPIC, 30_000);
+      expect(dlqMessage).not.toBeNull();
+
+      const dlqEnvelope = JSON.parse(dlqMessage!.value!.toString());
+      expect(dlqEnvelope.topic).toBe(INVALID_INPUT_TOPIC);
+      expect(dlqEnvelope.errorMessage.toLowerCase()).toMatch(/parse|json/);
+      expect(dlqEnvelope.failedAt).toBeDefined();
+
+      // 7. Verify consumer continues: send valid message after invalid
+      await produceMessage(brokers, INVALID_INPUT_TOPIC, {
+        value: JSON.stringify({ task: 'Still working after error?' }),
+      });
+
+      // 8. Consume response — should succeed (consumer didn't crash)
+      const responseMessage = await consumeOneMessage(brokers, INVALID_RESPONSE_TOPIC, 90_000);
+      expect(responseMessage).not.toBeNull();
+
+      const response = JSON.parse(responseMessage!.value!.toString());
+      expect(response.status).toBe('success');
+      expect(response.response).toBeDefined();
+      expect(typeof response.response).toBe('string');
+      expect(response.response.length).toBeGreaterThan(0);
+
+      // 9. Stop plugin
+      await pluginHandle.stop();
+    },
+    120_000
+  );
+
+  test(
+    'T-E2E-008: consumer recovery — series of errors',
+    async function () {
+      // 1. Create recovery test topics
+      await createTopics(brokers, [
+        RECOVERY_INPUT_TOPIC,
+        RECOVERY_RESPONSE_TOPIC,
+        RECOVERY_DLQ_TOPIC,
+      ]);
+
+      // 2. Create SDK client and agent adapter
+      const sdkClient = createSDKClient({ baseURL: opencodeHandle.baseURL });
+      const agent = new OpenCodeAgentAdapter(sdkClient);
+
+      // 3. Start plugin consumer
+      const brokersString = brokers.join(',');
+      const connection = {
+        brokers: brokersString,
+        clientId: 'e2e-recovery-client',
+        groupId: `e2e-recovery-group-${Date.now()}`,
+        dlqTopic: RECOVERY_DLQ_TOPIC,
+      };
+
+      const recoveryConfig: PluginConfigV003 = {
+        topics: [RECOVERY_INPUT_TOPIC],
+        rules: [
+          {
+            name: 'e2e-recovery-rule',
+            jsonPath: '$.task',
+            promptTemplate: '{{value}}',
+            agentId: AGENT_ID,
+            responseTopic: RECOVERY_RESPONSE_TOPIC,
+            timeoutMs: 60_000,
+            concurrency: 1,
+          },
+        ],
+      };
+
+      const pluginHandle = await runPlugin(recoveryConfig, agent, connection);
+
+      // 4. Give consumer time to connect and subscribe
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+
+      // 5. Send series: invalid → valid → invalid → valid
+      // Message 1: invalid JSON
+      await produceMessage(brokers, RECOVERY_INPUT_TOPIC, { value: 'invalid-json-1' });
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+      // Message 2: valid JSON
+      await produceMessage(brokers, RECOVERY_INPUT_TOPIC, {
+        value: JSON.stringify({ task: 'What is 1+1?' }),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+      // Message 3: invalid JSON
+      await produceMessage(brokers, RECOVERY_INPUT_TOPIC, { value: 'invalid-json-2' });
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+      // Message 4: valid JSON
+      await produceMessage(brokers, RECOVERY_INPUT_TOPIC, {
+        value: JSON.stringify({ task: 'What is 3+3?' }),
+      });
+
+      // 6. Wait for all processing to complete
+      await new Promise((resolve) => setTimeout(resolve, 10_000));
+
+      // 7. Verify 2 DLQ messages (2 invalid)
+      const dlqMessages = await consumeMessages(brokers, RECOVERY_DLQ_TOPIC, 2, 30_000);
+      expect(dlqMessages.length).toBe(2);
+
+      for (const dlqRaw of dlqMessages) {
+        const dlqEnvelope = JSON.parse(dlqRaw.value!.toString());
+        expect(dlqEnvelope.topic).toBe(RECOVERY_INPUT_TOPIC);
+        expect(dlqEnvelope.errorMessage.toLowerCase()).toMatch(/parse|json/);
+        expect(dlqEnvelope.failedAt).toBeDefined();
+      }
+
+      // 8. Verify 2 success responses (2 valid)
+      const responseMessages = await consumeMessages(brokers, RECOVERY_RESPONSE_TOPIC, 2, 90_000);
+      expect(responseMessages.length).toBe(2);
+
+      for (const respRaw of responseMessages) {
+        const resp = JSON.parse(respRaw.value!.toString());
+        expect(resp.status).toBe('success');
+        expect(resp.response).toBeDefined();
+        expect(typeof resp.response).toBe('string');
+        expect(resp.response.length).toBeGreaterThan(0);
+        expect(resp.ruleName).toBe('e2e-recovery-rule');
+      }
 
       // 9. Stop plugin
       await pluginHandle.stop();

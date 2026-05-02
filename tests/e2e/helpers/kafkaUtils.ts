@@ -189,5 +189,77 @@ async function consumeOneMessage(
   return result;
 }
 
-export { createTopics, produceMessage, consumeOneMessage };
+/**
+ * Потребляет несколько сообщений из указанного топика.
+ * Использует уникальный consumer group ID для каждого вызова.
+ * @param brokers - список брокеров Kafka
+ * @param topic - название топика
+ * @param expectedCount - ожидаемое количество сообщений
+ * @param timeoutMs - общий таймаут ожидания в миллисекундах (по умолчанию 30000)
+ * @returns массив сообщений (может быть меньше expectedCount если таймаут)
+ */
+async function consumeMessages(
+  brokers: string[],
+  topic: string,
+  expectedCount: number,
+  timeoutMs: number = 30_000
+): Promise<KafkaMessage[]> {
+  const kafka = new Kafka({
+    clientId: 'e2e-consume-messages',
+    brokers,
+  });
+
+  const consumer = kafka.consumer({
+    groupId: crypto.randomUUID(),
+  });
+
+  await consumer.connect();
+  await consumer.subscribe({ topic, fromBeginning: true });
+
+  const messages: KafkaMessage[] = [];
+  let resolveRun: () => void;
+  const runPromise = new Promise<void>((resolve) => { resolveRun = resolve; });
+
+  const timeoutPromise = new Promise<void>((resolve) => {
+    setTimeout(resolve, timeoutMs);
+  });
+
+  try {
+    // Запускаем consumer
+    consumer.run({
+      eachMessage: async ({ message }) => {
+        messages.push(message);
+        if (messages.length >= expectedCount) {
+          resolveRun(); // Достаточно сообщений получено
+        }
+      },
+    });
+
+    // Ждём либо enough messages, либо таймаут
+    await Promise.race([runPromise, timeoutPromise]);
+
+    console.log(JSON.stringify({
+      msg: 'Messages received',
+      topic,
+      count: messages.length,
+      expected: expectedCount,
+      brokers,
+    }));
+  } finally {
+    try {
+      await consumer.stop();
+      await consumer.disconnect();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log(JSON.stringify({
+        msg: 'Consumer disconnect error',
+        error: errorMessage,
+      }));
+    }
+  }
+
+  return messages;
+}
+
+export { createTopics, produceMessage, consumeOneMessage, consumeMessages };
 export type { KafkaTestMessage, KafkaMessage };

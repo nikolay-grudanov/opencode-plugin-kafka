@@ -111,7 +111,7 @@
 
 **Independent Test**: Настроить правило без responseTopic, проверить что response topic и DLQ пусты
 
-- [ ] T015 [US6] Add T-E2E-006 fire-and-forget test to tests/e2e/consumer.e2e.test.ts — test: produce message to fire-forget input topic (rule without responseTopic), wait, assert responseTopic empty, assert DLQ empty
+- [x] T015 [US6] Add T-E2E-006 fire-and-forget test to tests/e2e/consumer.e2e.test.ts — test: produce message to fire-forget input topic (rule without responseTopic), wait, assert responseTopic empty, assert DLQ empty
 
 **Checkpoint**: Optional responseTopic подтверждён — fire-and-forget работает без побочных эффектов
 
@@ -123,7 +123,7 @@
 
 **Independent Test**: Отправить невалидный JSON, проверить DLQ и что consumer продолжает работу
 
-- [ ] T016a [US7] Add T-E2E-007 invalid JSON→DLQ test to tests/e2e/consumer.e2e.test.ts — test: produce "not a json" (raw string) to input topic, consume DLQ, assert error contains "parse" or "JSON"; produce valid message after, assert success — consumer continues
+- [x] T016a [US7] Add T-E2E-007 invalid JSON→DLQ test to tests/e2e/consumer.e2e.test.ts — test: produce "not a json" (raw string) to input topic, consume DLQ, assert error contains "parse" or "JSON"; produce valid message after, assert success — consumer continues
 
 **Checkpoint**: Resiliency подтверждён для невалидных данных — consumer не падает на malformed JSON
 
@@ -135,7 +135,7 @@
 
 **Independent Test**: Отправить invalid→valid→invalid→valid, проверить что все валидные обработаны, все невалидные в DLQ
 
-- [ ] T016b [US8] Add T-E2E-008 consumer recovery test to tests/e2e/consumer.e2e.test.ts — test: send series of 4 messages (invalid→valid→invalid→valid), verify 2 valid processed with success, 2 invalid in DLQ, consumer alive
+- [x] T016b [US8] Add T-E2E-008 consumer recovery test to tests/e2e/consumer.e2e.test.ts — test: send series of 4 messages (invalid→valid→invalid→valid), verify 2 valid processed with success, 2 invalid in DLQ, consumer alive
 
 **Checkpoint**: No-State Consumer + Resiliency подтверждены — consumer не накапливает состояние при ошибках
 
@@ -145,8 +145,8 @@
 
 **Purpose**: CI-интеграция и финальная валидация
 
-- [ ] T016 [P] Create GitHub Actions E2E workflow in .github/workflows/e2e.yml — trigger: workflow_dispatch only, self-hosted runner, steps: checkout → setup node 20 → npm ci → npm run test:e2e
-- [ ] T017 [P] Verify npm run check does NOT include E2E tests — run npm run check, confirm no e2e tests executed
+- [x] T016 [P] Create GitHub Actions E2E workflow in .github/workflows/e2e.yml — trigger: workflow_dispatch only, self-hosted runner, steps: checkout → setup node 20 → npm ci → npm run test:e2e
+- [x] T017 [P] Verify npm run check does NOT include E2E tests — run npm run check, confirm no e2e tests executed
 - [ ] T018 Run full E2E suite via `npm run test:e2e` and validate against quickstart.md — confirm all 8 tests pass, no zombie processes, cleanup works
 
 ---
