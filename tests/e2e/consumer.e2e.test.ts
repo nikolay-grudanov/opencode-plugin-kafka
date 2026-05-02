@@ -3,6 +3,7 @@
  *
  * T-E2E-001: Happy Path — produce task, consume response
  * T-E2E-002: Routing — JSONPath match/skip
+ * T-E2E-003: JSONPath field extraction
  * T-E2E-004: Agent timeout → DLQ
  */
 import { describe, test, beforeAll, afterAll, expect } from 'vitest';
@@ -58,6 +59,10 @@ describe('Kafka consumer E2E', () => {
   // Timeout test topics
   const TIMEOUT_INPUT_TOPIC = 'e2e-timeout-input';
   const TIMEOUT_DLQ_TOPIC = 'e2e-timeout-input-dlq';
+
+  // Field extraction test topics
+  const EXTRACTION_INPUT_TOPIC = 'e2e-extraction-input';
+  const EXTRACTION_RESPONSE_TOPIC = 'e2e-extraction-response';
 
   const pluginConfig: PluginConfigV003 = {
     topics: [INPUT_TOPIC],
@@ -196,6 +201,22 @@ describe('Kafka consumer E2E', () => {
     ],
   };
 
+  // Field extraction plugin config для T-E2E-003
+  const extractionPluginConfig: PluginConfigV003 = {
+    topics: [EXTRACTION_INPUT_TOPIC],
+    rules: [
+      {
+        name: 'e2e-extraction-rule',
+        jsonPath: '$.data.query',
+        promptTemplate: 'Context: ${$.data.context} Question: ${$.data.query}',
+        agentId: AGENT_ID,
+        responseTopic: EXTRACTION_RESPONSE_TOPIC,
+        timeoutMs: 60_000,
+        concurrency: 1,
+      },
+    ],
+  };
+
   test(
     'T-E2E-002: routing — JSONPath match/skip',
     async function () {
@@ -314,6 +335,59 @@ describe('Kafka consumer E2E', () => {
       expect(secondEnvelope.errorMessage.toLowerCase()).toContain('timeout');
 
       // 10. Stop plugin
+      await pluginHandle.stop();
+    },
+    120_000
+  );
+
+  test(
+    'T-E2E-003: JSONPath field extraction',
+    async function () {
+      // 1. Create extraction topics
+      await createTopics(brokers, [EXTRACTION_INPUT_TOPIC, EXTRACTION_RESPONSE_TOPIC]);
+
+      // 2. Create SDK client and agent adapter
+      const sdkClient = createSDKClient({ baseURL: opencodeHandle.baseURL });
+      const agent = new OpenCodeAgentAdapter(sdkClient);
+
+      // 3. Start plugin consumer with extraction config
+      const brokersString = brokers.join(',');
+      const connection = {
+        brokers: brokersString,
+        clientId: 'e2e-extraction-client',
+        groupId: `e2e-extraction-group-${Date.now()}`,
+        dlqTopic: 'e2e-extraction-dlq',
+      };
+      const pluginHandle = await runPlugin(extractionPluginConfig, agent, connection);
+
+      // 4. Give consumer time to connect and subscribe
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+
+      // 5. Produce message with nested fields
+      const extractionMessage = {
+        data: {
+          query: 'What is TypeScript?',
+          context: 'Programming languages discussion',
+        },
+      };
+      await produceMessage(brokers, EXTRACTION_INPUT_TOPIC, {
+        value: JSON.stringify(extractionMessage),
+      });
+
+      // 6. Consume response (with generous timeout for E2E)
+      const responseMessage = await consumeOneMessage(brokers, EXTRACTION_RESPONSE_TOPIC, 90_000);
+      expect(responseMessage).not.toBeNull();
+
+      // 7. Parse and assert response
+      const response = JSON.parse(responseMessage!.value!.toString());
+      expect(response.status).toBe('success');
+      expect(response.response).toBeDefined();
+      expect(typeof response.response).toBe('string');
+      expect(response.response.length).toBeGreaterThan(0);
+      expect(response.ruleName).toBe('e2e-extraction-rule');
+      expect(response.agentId).toBe(AGENT_ID);
+
+      // 8. Stop plugin
       await pluginHandle.stop();
     },
     120_000

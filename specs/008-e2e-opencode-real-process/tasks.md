@@ -87,7 +87,7 @@
 
 **Independent Test**: Отправить сообщение с вложенной структурой, проверить что ответ содержит релевантные ключевые слова
 
-- [ ] T013 [US3] Add T-E2E-003 field extraction test to tests/e2e/consumer.e2e.test.ts — test: send { data: { query: "What is TypeScript?", context: "Programming languages" } }, consume response, assert response contains relevant keywords
+- [x] T013 [US3] Add T-E2E-003 field extraction test to tests/e2e/consumer.e2e.test.ts — test: send { data: { query: "What is TypeScript?", context: "Programming languages" } }, consume response, assert response contains relevant keywords
 
 **Checkpoint**: Prompt assembly через buildPromptV003 подтверждён в реальных условиях
 
