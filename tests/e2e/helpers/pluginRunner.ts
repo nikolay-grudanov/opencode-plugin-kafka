@@ -6,8 +6,8 @@
  */
 
 import type { PluginConfigV003 } from '../../../src/schemas/index.js';
+import type { IOpenCodeAgent } from '../../../src/opencode/IOpenCodeAgent.js';
 import { startConsumer } from '../../../src/kafka/consumer.js';
-import { MockOpenCodeAgent } from '../../../src/opencode/MockOpenCodeAgent.js';
 
 /**
  * Таймаут для graceful shutdown при остановке плагина (10 секунд).
@@ -62,13 +62,18 @@ interface KafkaConnectionSettings {
  * Запускает Kafka плагин (consumer) в текущем процессе.
  *
  * @param config - Конфигурация плагина (topics + rules)
+ * @param agent - Агент для обработки сообщений (IOpenCodeAgent)
  * @param connection - Настройки подключения к Kafka
  * @returns Promise<PluginRunnerHandle> — дескриптор для остановки
  *
  * @example
  * ```ts
+ * import { OpenCodeAgentAdapter } from '../../../src/opencode/OpenCodeAgentAdapter.js';
+ *
+ * const agent = new OpenCodeAgentAdapter({ baseURL: 'http://localhost:3001' });
  * const handle = await runPlugin(
  *   { topics: ['input'], rules: [...] },
+ *   agent,
  *   { brokers: 'localhost:9092', clientId: 'test', groupId: 'test-group' }
  * );
  *
@@ -79,6 +84,7 @@ interface KafkaConnectionSettings {
  */
 async function runPlugin(
   config: PluginConfigV003,
+  agent: IOpenCodeAgent,
   connection: KafkaConnectionSettings,
 ): Promise<PluginRunnerHandle> {
   // Сохраняем оригинальную функцию process.exit
@@ -135,17 +141,9 @@ async function runPlugin(
     process.env.KAFKA_IGNORE_TOMBSTONES = connection.ignoreTombstones ? 'true' : 'false';
   }
 
-  // Создаём mock агент
-  const mockAgent = new MockOpenCodeAgent([
-    {
-      agentId: 'default',
-      response: 'Mock response from pluginRunner',
-    },
-  ]);
-
   // Запускаем consumer — он работает в фоне (не await-им)
   // startConsumer устанавливает signal handlers и блокируется на consume()
-  const consumerPromise = startConsumer(config, mockAgent).catch((error) => {
+  const consumerPromise = startConsumer(config, agent).catch((error) => {
     console.warn(
       JSON.stringify({
         msg: 'Consumer error in pluginRunner',

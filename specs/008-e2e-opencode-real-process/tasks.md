@@ -51,7 +51,7 @@
 
 **Independent Test**: Отправить сообщение в input-топик, проверить responseTopic — status: success, непустой response, заполненные sessionId и ruleName
 
-- [ ] T010 [US1] Create tests/e2e/consumer.e2e.test.ts with beforeAll/afterAll skeleton and T-E2E-001 happy path test — beforeAll: start Redpanda, spawn opencode serve, create topics, snapshot hash of ~/.config/opencode/opencode.json; afterAll: cleanup; test: produce { task: "What is 2+2?" }, consume responseTopic, assert status=success, response non-empty, sessionId set, ruleName=e2e-echo-rule; in afterAll: snapshot hash of ~/.config/opencode/opencode.json before/after — assert unchanged (FR-009)
+- [x] T010 [US1] Create tests/e2e/consumer.e2e.test.ts with beforeAll/afterAll skeleton and T-E2E-001 happy path test — beforeAll: start Redpanda, spawn opencode serve, create topics, snapshot hash of ~/.config/opencode/opencode.json; afterAll: cleanup; test: produce { task: "What is 2+2?" }, consume responseTopic, assert status=success, response non-empty, sessionId set, ruleName=e2e-echo-rule; in afterAll: snapshot hash of ~/.config/opencode/opencode.json before/after — assert unchanged (FR-009)
 
 **Checkpoint**: Happy Path работает — минимальный жизнеспособный E2E-тест пройден
 
