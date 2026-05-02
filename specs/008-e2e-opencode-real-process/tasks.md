@@ -75,7 +75,7 @@
 
 **Independent Test**: Установить timeoutMs: 100, отправить сообщение, проверить DLQ с ошибкой timeout
 
-- [ ] T012 [US4] Add T-E2E-004 timeout→DLQ test to tests/e2e/consumer.e2e.test.ts — test: produce message with rule timeoutMs: 100 (too low for LLM), consume DLQ topic, assert originalTopic=e2e-input, error contains "timeout"; verify consumer continues
+- [x] T012 [US4] Add T-E2E-004 timeout→DLQ test to tests/e2e/consumer.e2e.test.ts — test: produce message with rule timeoutMs: 100 (too low for LLM), consume DLQ topic, assert originalTopic=e2e-input, error contains "timeout"; verify consumer continues
 
 **Checkpoint**: Resiliency подтверждён E2E — timeout handling работает в реальном окружении
 

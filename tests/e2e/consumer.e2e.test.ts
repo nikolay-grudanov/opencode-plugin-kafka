@@ -3,6 +3,7 @@
  *
  * T-E2E-001: Happy Path — produce task, consume response
  * T-E2E-002: Routing — JSONPath match/skip
+ * T-E2E-004: Agent timeout → DLQ
  */
 import { describe, test, beforeAll, afterAll, expect } from 'vitest';
 import {
@@ -53,6 +54,10 @@ describe('Kafka consumer E2E', () => {
   const ROUTING_INPUT_TOPIC = 'e2e-routing-input';
   const ROUTING_RESPONSE_TOPIC = 'e2e-routing-response';
   const ROUTING_DLQ_TOPIC = 'e2e-routing-input-dlq';
+
+  // Timeout test topics
+  const TIMEOUT_INPUT_TOPIC = 'e2e-timeout-input';
+  const TIMEOUT_DLQ_TOPIC = 'e2e-timeout-input-dlq';
 
   const pluginConfig: PluginConfigV003 = {
     topics: [INPUT_TOPIC],
@@ -175,6 +180,22 @@ describe('Kafka consumer E2E', () => {
     ],
   };
 
+  // Timeout plugin config для T-E2E-004
+  const timeoutPluginConfig: PluginConfigV003 = {
+    topics: [TIMEOUT_INPUT_TOPIC],
+    rules: [
+      {
+        name: 'e2e-timeout-rule',
+        jsonPath: '$.task',
+        promptTemplate: '{{value}}',
+        agentId: AGENT_ID,
+        responseTopic: 'e2e-timeout-response',
+        timeoutMs: 100, // заведомо мало для реального LLM
+        concurrency: 1,
+      },
+    ],
+  };
+
   test(
     'T-E2E-002: routing — JSONPath match/skip',
     async function () {
@@ -232,6 +253,65 @@ describe('Kafka consumer E2E', () => {
       expect(response.response.length).toBeGreaterThan(0);
       expect(response.ruleName).toBe('e2e-routing-rule');
       expect(response.agentId).toBe(AGENT_ID);
+
+      // 10. Stop plugin
+      await pluginHandle.stop();
+    },
+    120_000
+  );
+
+  test(
+    'T-E2E-004: timeout → DLQ',
+    async function () {
+      // 1. Create timeout topics
+      await createTopics(brokers, [TIMEOUT_INPUT_TOPIC, TIMEOUT_DLQ_TOPIC]);
+
+      // 2. Create SDK client and agent adapter
+      const sdkClient = createSDKClient({ baseURL: opencodeHandle.baseURL });
+      const agent = new OpenCodeAgentAdapter(sdkClient);
+
+      // 3. Start plugin consumer with timeout config
+      const brokersString = brokers.join(',');
+      const connection = {
+        brokers: brokersString,
+        clientId: 'e2e-timeout-client',
+        groupId: `e2e-timeout-group-${Date.now()}`,
+        dlqTopic: TIMEOUT_DLQ_TOPIC,
+      };
+      const pluginHandle = await runPlugin(timeoutPluginConfig, agent, connection);
+
+      // 4. Give consumer time to connect and subscribe
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+
+      // 5. Produce message that will timeout
+      const timeoutMessage = { task: 'This should timeout' };
+      await produceMessage(brokers, TIMEOUT_INPUT_TOPIC, {
+        value: JSON.stringify(timeoutMessage),
+      });
+
+      // 6. Consume from DLQ (timeout message should appear)
+      const dlqMessage = await consumeOneMessage(brokers, TIMEOUT_DLQ_TOPIC, 30_000);
+      expect(dlqMessage).not.toBeNull();
+
+      // 7. Parse and assert DLQ envelope
+      const dlqEnvelope = JSON.parse(dlqMessage!.value!.toString());
+      expect(dlqEnvelope.topic).toBe(TIMEOUT_INPUT_TOPIC);
+      expect(dlqEnvelope.errorMessage.toLowerCase()).toContain('timeout');
+      expect(dlqEnvelope.originalValue).not.toBeNull();
+      expect(dlqEnvelope.failedAt).toBeDefined();
+
+      // 8. Verify consumer continues: send another message
+      const secondMessage = { task: 'Another timeout test' };
+      await produceMessage(brokers, TIMEOUT_INPUT_TOPIC, {
+        value: JSON.stringify(secondMessage),
+      });
+
+      // 9. Consume second DLQ message — proves consumer is still alive
+      const secondDlqMessage = await consumeOneMessage(brokers, TIMEOUT_DLQ_TOPIC, 30_000);
+      expect(secondDlqMessage).not.toBeNull();
+      const secondEnvelope = JSON.parse(secondDlqMessage!.value!.toString());
+      expect(secondEnvelope.topic).toBe(TIMEOUT_INPUT_TOPIC);
+      expect(secondEnvelope.errorMessage.toLowerCase()).toContain('timeout');
 
       // 10. Stop plugin
       await pluginHandle.stop();
