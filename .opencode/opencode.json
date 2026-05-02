@@ -119,6 +119,16 @@
           "code-*": "allow"
         }
       }
+    },
+    "e2e-responder": {
+      "description": "Тестовый агент для E2E-тестирования. Отвечает кратко, без инструментов.",
+      "mode": "subagent",
+      "model": "lemonade",
+      "prompt": "{file:agents/e2e-responder.md}",
+      "temperature": 0.1,
+      "permission": {
+        "*": "deny"
+      }
     }
   },
   "mcp": {

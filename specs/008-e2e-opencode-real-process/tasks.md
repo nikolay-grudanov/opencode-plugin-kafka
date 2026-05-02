@@ -19,11 +19,11 @@
 
 **Purpose**: Конфигурация Vitest для E2E, скрипты запуска, тестовый агент OpenCode
 
-- [ ] T001 Create E2E Vitest config in vitest.e2e.config.ts — timeout: 120_000, hookTimeout: 60_000, pool: 'forks', singleFork: true, include: ['tests/e2e/**/*.e2e.test.ts'], env defaults for KAFKA_BROKERS/KAFKA_CLIENT_ID/KAFKA_GROUP_ID
-- [ ] T002 [P] Add "test:e2e" script to package.json — `"test:e2e": "vitest run --config vitest.e2e.config.ts"`
-- [ ] T003 [P] Create e2e-responder agent system prompt in .opencode/agents/e2e-responder.md — instructions: answer briefly, no tools, respond with minimal text
-- [ ] T004 [P] Add e2e-responder agent entry to .opencode/opencode.json — mode: subagent, model: lemonade, temperature: 0.1, permission: deny all, prompt: {file:agents/e2e-responder.md}
-- [ ] T004a [P] Update quickstart.md with E2E test run instructions — document prerequisites (Lemonade, Docker), commands (`npm run test:e2e`), expected output, troubleshooting tips
+- [x] T001 Create E2E Vitest config in vitest.e2e.config.ts — timeout: 120_000, hookTimeout: 60_000, pool: 'forks', singleFork: true, include: ['tests/e2e/**/*.e2e.test.ts'], env defaults for KAFKA_BROKERS/KAFKA_CLIENT_ID/KAFKA_GROUP_ID
+- [x] T002 [P] Add "test:e2e" script to package.json — `"test:e2e": "vitest run --config vitest.e2e.config.ts"`
+- [x] T003 [P] Create e2e-responder agent system prompt in .opencode/agents/e2e-responder.md — instructions: answer briefly, no tools, respond with minimal text
+- [x] T004 [P] Add e2e-responder agent entry to .opencode/opencode.json — mode: subagent, model: lemonade, temperature: 0.1, permission: deny all, prompt: {file:agents/e2e-responder.md}
+- [x] T004a [P] Update quickstart.md with E2E test run instructions — document prerequisites (Lemonade, Docker), commands (`npm run test:e2e`), expected output, troubleshooting tips
 
 ---
 
@@ -33,13 +33,13 @@
 
 **⚠️ CRITICAL**: Ни один E2E-тест не может быть написан до завершения этой фазы
 
-- [ ] T005 Implement startRedpanda/stopRedpanda in tests/e2e/helpers/redpandaContainer.ts — REAL Redpanda через @testcontainers/redpanda, вернуть brokers array, cleanup через container.stop()
-- [ ] T006 [P] Implement spawnOpenCodeServe/OpenCodeProcessHandle in tests/e2e/helpers/opencodeProcess.ts — spawn child process, port pre-check (error if busy), health polling GET /health every 500ms, 30s startup timeout, kill() method: SIGTERM → 5s → SIGKILL
-- [ ] T007 [P] Implement createTopics/produceMessage/consumeOneMessage in tests/e2e/helpers/kafkaUtils.ts — admin client for topics, producer, consumer with fromBeginning: false and unique group ID per call, timeout-based consume
-- [ ] T008 [P] Implement createSDKClient in tests/e2e/helpers/sdkClient.ts — создать SDK клиент через `@opencode-ai/sdk` с custom baseURL, адаптировать к SDKClient интерфейсу
-- [ ] T008a [P] Add @opencode-ai/sdk to dependencies in package.json — verify or add `"@opencode-ai/sdk": "^1.14.28"`
-- [ ] T008b [P] Implement timing helper in tests/e2e/helpers/timing.ts — startTimer(label) returns stop function, logs elapsed ms to stdout with [e2e-timing] prefix, used in beforeAll/afterAll for infrastructure timing and in tests for execution timing
-- [ ] T009 Implement runPlugin/PluginRunnerHandle in tests/e2e/helpers/pluginRunner.ts — set process.env from params, call startConsumer(config, agent), return handle with stop() calling performGracefulShutdown, 10s shutdown timeout, swallow errors on cleanup
+- [x] T005 Implement startRedpanda/stopRedpanda in tests/e2e/helpers/redpandaContainer.ts — REAL Redpanda через @testcontainers/redpanda, вернуть brokers array, cleanup через container.stop()
+- [x] T006 [P] Implement spawnOpenCodeServe/OpenCodeProcessHandle in tests/e2e/helpers/opencodeProcess.ts — spawn child process, port pre-check (error if busy), health polling GET /health every 500ms, 30s startup timeout, kill() method: SIGTERM → 5s → SIGKILL
+- [x] T007 [P] Implement createTopics/produceMessage/consumeOneMessage in tests/e2e/helpers/kafkaUtils.ts — admin client for topics, producer, consumer with fromBeginning: false and unique group ID per call, timeout-based consume
+- [x] T008 [P] Implement createSDKClient in tests/e2e/helpers/sdkClient.ts — создать SDK клиент через `@opencode-ai/sdk` с custom baseURL, адаптировать к SDKClient интерфейсу
+- [x] T008a [P] Add @opencode-ai/sdk to dependencies in package.json — verify or add `"@opencode-ai/sdk": "^1.14.28"`
+- [x] T008b [P] Implement timing helper in tests/e2e/helpers/timing.ts — startTimer(label) returns stop function, logs elapsed ms to stdout with [e2e-timing] prefix, used in beforeAll/afterAll for infrastructure timing and in tests for execution timing
+- [x] T009 Implement runPlugin/PluginRunnerHandle in tests/e2e/helpers/pluginRunner.ts — set process.env from params, call startConsumer(config, agent), return handle with stop() calling performGracefulShutdown, 10s shutdown timeout, swallow errors on cleanup
 
 **Checkpoint**: Все helper-модули готовы → можно писать E2E-тесты
 
