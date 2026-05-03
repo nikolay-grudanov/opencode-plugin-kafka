@@ -43,8 +43,9 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
 
     try {
       // 1. Создаём новую сессию
+      // hey-api wrapper возвращает { data: { id: ... }, error: null }
       const session = await this.client.session.create({ body: { title: `kafka-plugin-${agentId}` } });
-      sessionId = session.id;
+      sessionId = session.data?.id ?? session.id;
 
       // 2. Устанавливаем timeout (по умолчанию 120 сек)
       const timeoutMs = options.timeoutMs ?? 120000;
@@ -76,7 +77,8 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
       }
 
       // 5. Извлекаем текст из ответа
-      const parts = response?.parts ?? [];
+      // hey-api wrapper возвращает { data: { parts: [...] }, error: null }
+      const parts = response?.data?.parts ?? response?.parts ?? [];
       const responseText = extractResponseText(parts);
 
       // 6. Успешный результат

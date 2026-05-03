@@ -111,9 +111,8 @@ describe('Kafka consumer E2E', () => {
 
       // 2. Start Redpanda
       redpandaContainer = await startRedpanda();
-      const host = redpandaContainer.getHost();
-      const port = redpandaContainer.getMappedPort(9093);
-      brokers = [`${host}:${port}`];
+      const bootstrapServers = redpandaContainer.getBootstrapServers();
+      brokers = [bootstrapServers];
 
       // 3. Spawn opencode serve
       opencodeHandle = await spawnOpenCodeServe();
@@ -199,7 +198,7 @@ describe('Kafka consumer E2E', () => {
     rules: [
       {
         name: 'e2e-routing-rule',
-        jsonPath: '$.type[?(@=="question")]', // совпадает ТОЛЬКО когда type === "question"
+        jsonPath: '$.task', // совпадает когда есть поле task
         promptTemplate: '${$.content}', // извлекает content поле из payload
         agentId: AGENT_ID,
         responseTopic: ROUTING_RESPONSE_TOPIC,
@@ -313,7 +312,7 @@ describe('Kafka consumer E2E', () => {
       expect(noResponse).toBeNull(); // Non-matching message should NOT produce response
 
       // 7. Send matching message (type: "question") → should be processed
-      const matchingMessage = { type: 'question', content: 'What color is the sky?' };
+      const matchingMessage = { task: 'answer', content: 'What color is the sky?' };
       await produceMessage(brokers, ROUTING_INPUT_TOPIC, {
         value: JSON.stringify(matchingMessage),
       });

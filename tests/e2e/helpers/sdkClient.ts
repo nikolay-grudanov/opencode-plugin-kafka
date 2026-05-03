@@ -4,16 +4,11 @@
  */
 
 import type { SDKClient } from '../../../src/types/opencode-sdk.js';
-import { Opencode } from '@opencode-ai/sdk';
+import { createOpencodeClient } from '@opencode-ai/sdk';
 
-/**
- * Создать SDK клиент для взаимодействия с OpenCode serve.
- * @param opts - параметры подключения
- * @returns готовый к использованию SDKClient
- */
 function createSDKClient(opts: { baseURL: string }): SDKClient {
-  const client = new Opencode({ baseURL: opts.baseURL });
-  return client as SDKClient;
+  const client = createOpencodeClient({ baseUrl: opts.baseURL });
+  return client as unknown as SDKClient;
 }
 
 export { createSDKClient };

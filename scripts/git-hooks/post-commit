@@ -1,0 +1,47 @@
+#!/bin/bash
+# post-commit hook: автоматический майнинг изменённых файлов в mempalace
+# Запускается после каждого git commit
+#
+# Установка: скопировать в .git/hooks/ или запустить npm run install-hooks
+#
+# wing: opencode-plugin-kafka
+
+set -e
+
+# Путь к проекту (родительская директория .git)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(git -C "$SCRIPT_DIR/../.." rev-parse --show-toplevel 2>/dev/null)"
+
+if [ -z "$PROJECT_DIR" ]; then
+    # Fallback для случая когда хук уже в .git/hooks/
+    PROJECT_DIR="$(dirname "$(git rev-parse --git-dir)")"
+fi
+
+cd "$PROJECT_DIR"
+
+# Получаем список изменённых файлов в последнем коммите
+COMMIT_FILES=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null || echo "")
+
+if [ -z "$COMMIT_FILES" ]; then
+    exit 0
+fi
+
+# Фильтруем только нужные папки (по mempalace.yaml)
+VALID_DIRS="src specs docs scripts tests"
+
+for file in $COMMIT_FILES; do
+    # Проверяем относится ли файл к одной из отслеживаемых папок
+    for dir in $VALID_DIRS; do
+        case "$file" in
+            "$dir"/* | "$dir")
+                # Файл найден — запускаем mempalace mine для него
+                npx mempalace mine "$PROJECT_DIR/$file" --wing opencode-plugin-kafka 2>/dev/null || {
+                    echo "[mempalace-hook] Warning: failed to mine $file"
+                }
+                break
+                ;;
+        esac
+    done
+done
+
+exit 0

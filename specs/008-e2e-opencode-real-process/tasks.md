@@ -147,7 +147,7 @@
 
 - [x] T016 [P] Create GitHub Actions E2E workflow in .github/workflows/e2e.yml — trigger: workflow_dispatch only, self-hosted runner, steps: checkout → setup node 20 → npm ci → npm run test:e2e
 - [x] T017 [P] Verify npm run check does NOT include E2E tests — run npm run check, confirm no e2e tests executed
-- [ ] T018 Run full E2E suite via `npm run test:e2e` and validate against quickstart.md — confirm all 8 tests pass, no zombie processes, cleanup works
+- [x] T018 Run full E2E suite via `npm run test:e2e` and validate against quickstart.md — confirm all 8 tests pass, no zombie processes, cleanup works
 
 ---
 
