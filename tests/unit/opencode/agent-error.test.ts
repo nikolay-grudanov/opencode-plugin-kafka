@@ -88,7 +88,7 @@ describe('AgentError', () => {
     const error = new AgentError('Agent invocation failed', original);
 
     expect(error.originalError).toBe(original);
-    expect(error.originalError?.message).toBe('SDK connection refused');
+    expect((error.originalError as Error)?.message).toBe('SDK connection refused');
   });
 
   it('имеет undefined originalError когда не передан', () => {

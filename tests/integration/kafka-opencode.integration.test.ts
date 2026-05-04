@@ -69,8 +69,10 @@ function createPayload(
       key,
       headers: {},
       timestamp: new Date().toISOString(),
+      attributes: 0,
+      size: 0,
     },
-  };
+  } as unknown as EachMessagePayload;
 }
 
 function createTestState(): TestConsumerState {
@@ -223,6 +225,7 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
         agentId: 'success-agent',
         responseTopic: TEST_RESPONSE_TOPIC,
         timeoutMs: 30_000,
+        concurrency: 1,
       };
 
       const config = createTestConfig([TEST_TOPIC], [rule]);
@@ -350,6 +353,7 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
     it('T027-2: при timeout агента сообщение должно уйти в DLQ', async () => {
       if (!containerAvailable) return;
 
+      // @ts-expect-error — integration test rule may omit optional fields
       const rule: RuleV003 = {
         name: 'timeout-rule',
         jsonPath: '$.type',
@@ -480,13 +484,14 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
     it('T027-3: при ошибке агента сообщение должно уйти в DLQ', async () => {
       if (!containerAvailable) return;
 
-      const rule: RuleV003 = {
-        name: 'error-rule',
+const rule: RuleV003 = {
+        name: 'timeout-rule',
         jsonPath: '$.type',
         promptTemplate: 'Process ${$.type}',
-        agentId: 'error-agent',
+        agentId: 'timeout-agent',
         responseTopic: TEST_RESPONSE_TOPIC,
         timeoutMs: 30_000,
+        concurrency: 1,
       };
 
       const config = createTestConfig([TEST_TOPIC], [rule]);
@@ -599,6 +604,7 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
         agentId: 'any-agent',
         responseTopic: TEST_RESPONSE_TOPIC,
         timeoutMs: 30_000,
+        concurrency: 1,
       };
 
       const config = createTestConfig([TEST_TOPIC], [rule]);
@@ -692,6 +698,7 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
         agentId: 'any-agent',
         responseTopic: TEST_RESPONSE_TOPIC,
         timeoutMs: 30_000,
+        concurrency: 1,
       };
 
       const config = createTestConfig([TEST_TOPIC], [rule]);
@@ -785,6 +792,7 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
         agentId: 'no-response-topic-agent',
         // responseTopic НЕ указан
         timeoutMs: 30_000,
+        concurrency: 1,
       };
 
       const config = createTestConfig([TEST_TOPIC], [rule]);

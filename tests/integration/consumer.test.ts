@@ -12,9 +12,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { Kafka, type Consumer, type Producer } from 'kafkajs';
+import { Kafka, type Consumer, type Producer, type EachMessagePayload } from 'kafkajs';
 import { RedpandaContainer } from '@testcontainers/redpanda';
-import type { StartedTestContainer } from 'testcontainers';
+import type { StartedTestContainer, StoppedTestContainer } from 'testcontainers';
 import type { PluginConfigV003 } from '../../src/schemas/index.js';
 import type { IOpenCodeAgent, AgentResult } from '../../src/opencode/IOpenCodeAgent.js';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
@@ -54,7 +54,8 @@ class MockOpenCodeAgent implements IOpenCodeAgent {
 /**
  * Mock контейнер для интеграционных тестов (fallback когда Docker недоступен)
  */
-class MockStartedTestContainer implements StartedTestContainer {
+// @ts-ignore - Mock class for testing without Docker (type mismatch with testcontainers)
+class MockStartedTestContainer {
   private host = 'localhost';
   private mappedPorts = new Map<number, number>();
   private mockKafka: Kafka | null = null;
@@ -78,7 +79,7 @@ class MockStartedTestContainer implements StartedTestContainer {
     return this.host;
   }
 
-  getMappedPort(port: number): number {
+  getMappedPort(port: number, _protocol?: string): number {
     return this.mappedPorts.get(port) || port;
   }
 
@@ -95,10 +96,11 @@ class MockStartedTestContainer implements StartedTestContainer {
     }
   }
 
-  async stop(): Promise<void> {
+  async stop(options?: unknown): Promise<StoppedTestContainer> {
     if (this.mockProducer) {
       await this.mockProducer.disconnect();
     }
+    return {} as StoppedTestContainer;
   }
 }
 
@@ -131,11 +133,17 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         name: 'vuln-rule',
         jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]',
         promptTemplate: 'Analyze vulnerabilities: ${$.vulnerabilities}',
+        agentId: 'test-agent',
+        timeoutMs: 30000,
+        concurrency: 1,
       },
       {
         name: 'audit-rule',
         jsonPath: '$.tasks[?(@.type=="code-audit")]',
         promptTemplate: 'Audit task: ${$.tasks[0].description}',
+        agentId: 'test-agent',
+        timeoutMs: 30000,
+        concurrency: 1,
       },
     ],
   };
@@ -158,14 +166,14 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
       // Fallback на mock контейнер если Docker недоступен
       console.warn('⚠️ Docker runtime not available, using mock container for integration tests');
       console.warn('To run tests with real Redpanda, ensure Docker/Podman is running and accessible');
-      redpandaContainer = new MockStartedTestContainer();
+      redpandaContainer = new MockStartedTestContainer() as unknown as StartedTestContainer;
       useMockContainer = true;
       bootstrapServers = `PLAINTEXT://localhost:9092`;
       console.log(`✅ Mock Redpanda initialized: ${bootstrapServers}`);
     }
 
     // Настраиваем environment variables для Kafka client
-    process.env.KAFKA_BROKERS = `${redpandaContainer.getHost()}:${redpandaContainer.getMappedPort(9092)}`;
+    process.env.KAFKA_BROKERS = `${redpandaContainer!.getHost()}:${redpandaContainer!.getMappedPort(9092)}`;
     process.env.KAFKA_CLIENT_ID = 'test-client';
     process.env.KAFKA_GROUP_ID = groupId;
     process.env.KAFKA_DLQ_TOPIC = dlqTopic;
@@ -180,12 +188,12 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
     // Создаём Kafka client
     kafka = new Kafka({
       clientId: 'test-client',
-      brokers: [`${redpandaContainer.getHost()}:${redpandaContainer.getMappedPort(9092)}`],
+      brokers: [`${redpandaContainer!.getHost()}:${redpandaContainer!.getMappedPort(9092)}`],
     });
 
     // Создаём producer и consumer
     producer = kafka.producer();
-    consumer = kafka.consumer({ groupId, autoCommit: false });
+    consumer = kafka.consumer({ groupId });
     dlqProducer = kafka.producer();
     responseProducer = kafka.producer();
 
@@ -256,7 +264,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
       await createTopics(kafka!, [t028Topic], 1, 1);
       console.log(`T028: created topic ${t028Topic}`);
 
-      let consumerRunPromise: Promise<void>;
+      let consumerRunPromise: Promise<void> = Promise.resolve();
       let dlqConsumer: Consumer | null = null;
 
       try {
@@ -284,7 +292,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
             // Mock console.log для перехвата логов
             const consoleLogSpy = vi.spyOn(console, 'log');
 
-            try {
+try {
               // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
               await eachMessageHandler(
                 {
@@ -296,8 +304,10 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
                     key: payload.message.key,
                     headers: payload.message.headers,
                     timestamp: payload.message.timestamp,
+                    attributes: 0,
+                    size: 0,
                   },
-                },
+                } as EachMessagePayload,
                 testConfig,
                 dlqProducer!,
                 consumer!.commitOffsets.bind(consumer!),
@@ -472,13 +482,13 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
         // Игнорируем если consumer уже остановлен/отключён
       }
 
-      consumer = kafka!.consumer({ groupId, autoCommit: false });
+      consumer = kafka!.consumer({ groupId });
       await consumer.connect();
 
       // Сбрасываем activeSessions для нового теста
       activeSessions!.clear();
 
-      let consumerRunPromise: Promise<void>;
+      let consumerRunPromise: Promise<void> = Promise.resolve();
 
       try {
         // Step 1: Подписываем consumer на уникальный topic
@@ -529,7 +539,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
                 // Добавляем искусственную задержку
                 await new Promise((resolve) => setTimeout(resolve, messageDelayMs));
 
-                // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
+// Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
                 await eachMessageHandler(
                   {
                     topic: payload.topic,
@@ -540,8 +550,10 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
                       key: payload.message.key,
                       headers: payload.message.headers,
                       timestamp: payload.message.timestamp,
+                      attributes: 0,
+                      size: 0,
                     },
-                  },
+                  } as EachMessagePayload,
                   testConfig,
                   dlqProducer!,
                   consumer!.commitOffsets.bind(consumer!),
@@ -702,7 +714,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
           headers: {},
           timestamp: '2024-04-22T00:00:00Z',
         },
-      };
+      } as unknown as import('kafkajs').EachMessagePayload;
 
       // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
       await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, mockActiveSessions);
@@ -785,7 +797,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
           headers: {},
           timestamp: '2024-04-22T00:00:00Z',
         },
-      };
+      } as unknown as import('kafkajs').EachMessagePayload;
 
       // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
       await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, mockActiveSessions);
@@ -865,7 +877,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
           headers: {},
           timestamp: '2024-04-22T00:00:00Z',
         },
-      };
+      } as unknown as import('kafkajs').EachMessagePayload;
 
       // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
       await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, mockActiveSessions);
@@ -946,7 +958,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
           headers: {},
           timestamp: '2024-04-22T00:00:00Z',
         },
-      };
+      } as unknown as import('kafkajs').EachMessagePayload;
 
       // Вызываем eachMessageHandler (полная сигнатура с 8 параметрами)
       await eachMessageHandler(payload, testConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, mockActiveSessions);
@@ -955,7 +967,7 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
       expect(mockDlqProducer.send).toHaveBeenCalled();
 
       // Проверяем что envelope содержит null originalValue
-      const sendCall = mockDlqProducer.send.mock.calls[0][0];
+      const sendCall = (mockDlqProducer.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as { topic: string; messages: Array<{ value: string }> };
       expect(sendCall.topic).toBe(dlqTopic);
       expect(sendCall.messages).toHaveLength(1);
 

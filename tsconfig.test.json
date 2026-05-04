@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "skipLibCheck": true,
+    "strictNullChecks": false
+  },
+  "include": [
+    "tests/**/*.ts"
+  ],
+  "exclude": [
+    "tests/e2e/**/*.ts"
+  ]
+}

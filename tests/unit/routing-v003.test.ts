@@ -7,6 +7,13 @@ import { describe, it, expect } from 'vitest';
 import { matchRuleV003 } from '../../src/core/routing.js';
 import type { RuleV003 } from '../../src/schemas/index.js';
 
+// Тестовые данные - минимальные обязательные поля для всех RuleV003
+const defaultRuleV003: Partial<RuleV003> = {
+  agentId: 'test-agent',
+  timeoutMs: 120_000,
+  concurrency: 1,
+};
+
 describe('matchRuleV003', () => {
   // Тест 1: Rule with matching jsonPath returns that rule
   it('должен вернуть правило, если jsonPath совпадает с payload', () => {
@@ -16,10 +23,11 @@ describe('matchRuleV003', () => {
 
     const rules: RuleV003[] = [
       {
+        ...defaultRuleV003,
         name: 'critical-vulns',
         jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]',
         promptTemplate: 'Critical vuln: ${$}',
-      },
+      } as RuleV003,
     ];
 
     const result = matchRuleV003(payload, rules);
@@ -36,10 +44,11 @@ describe('matchRuleV003', () => {
 
     const rules: RuleV003[] = [
       {
+        ...defaultRuleV003,
         name: 'critical-vulns',
         jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]',
         promptTemplate: 'Critical vuln: ${$}',
-      },
+      } as RuleV003,
     ];
 
     const result = matchRuleV003(payload, rules);
@@ -55,10 +64,11 @@ describe('matchRuleV003', () => {
 
     const rules: RuleV003[] = [
       {
+        ...defaultRuleV003,
         name: 'root-path',
         jsonPath: '$',
         promptTemplate: 'Root: ${$}',
-      },
+      } as RuleV003,
     ];
 
     const result = matchRuleV003(payload, rules);
@@ -75,20 +85,23 @@ describe('matchRuleV003', () => {
 
     const rules: RuleV003[] = [
       {
+        ...defaultRuleV003,
         name: 'first-rule',
         jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]',
         promptTemplate: 'First: ${$}',
-      },
+      } as RuleV003,
       {
+        ...defaultRuleV003,
         name: 'second-rule',
         jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]',
         promptTemplate: 'Second: ${$}',
-      },
+      } as RuleV003,
       {
+        ...defaultRuleV003,
         name: 'third-rule',
         jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]',
         promptTemplate: 'Third: ${$}',
-      },
+      } as RuleV003,
     ];
 
     const result = matchRuleV003(payload, rules);
@@ -101,10 +114,11 @@ describe('matchRuleV003', () => {
   it('должен корректно обрабатывать null и undefined payload', () => {
     const rules: RuleV003[] = [
       {
+        ...defaultRuleV003,
         name: 'root-path',
         jsonPath: '$',
         promptTemplate: 'Root: ${$}',
-      },
+      } as RuleV003,
     ];
 
     // Тест с null payload
@@ -132,13 +146,14 @@ describe('matchRuleV003', () => {
 
     const rules: RuleV003[] = [
       {
+        ...defaultRuleV003,
         name: 'invalid-jsonpath',
         jsonPath: '[[invalid jsonpath',
         promptTemplate: 'Invalid: ${$}',
-      },
+      } as RuleV003,
     ];
 
-    // При некорректном JSONPath JSONPath бросит ошибку
+    // При некорректном JSONPath JSONPath бросет ошибку
     // Но это нормально — это будет обнаружено в runtime
     expect(() => matchRuleV003(payload, rules)).not.toThrow();
   });
@@ -156,10 +171,11 @@ describe('matchRuleV003', () => {
 
     const rules: RuleV003[] = [
       {
+        ...defaultRuleV003,
         name: 'complex-filter',
         jsonPath: "$.data.items[?(@.active==true && @.type=='A')]",
         promptTemplate: 'Active A: ${$}',
-      },
+      } as RuleV003,
     ];
 
     const result = matchRuleV003(payload, rules);
@@ -179,15 +195,17 @@ describe('matchRuleV003', () => {
 
     const rules: RuleV003[] = [
       {
+        ...defaultRuleV003,
         name: 'rule1',
         jsonPath: '$.data[?(@.type=="CRITICAL")]',
         promptTemplate: 'Critical: ${$}',
-      },
+      } as RuleV003,
       {
+        ...defaultRuleV003,
         name: 'rule2',
         jsonPath: '$.data[?(@.type=="INFO")]',
         promptTemplate: 'Info: ${$}',
-      },
+      } as RuleV003,
     ];
 
     const result = matchRuleV003(payload, rules);
@@ -205,10 +223,11 @@ describe('matchRuleV003', () => {
 
     const rules: RuleV003[] = [
       {
+        ...defaultRuleV003,
         name: 'multiple-items',
         jsonPath: '$.items',
         promptTemplate: 'Items: ${$}',
-      },
+      } as RuleV003,
     ];
 
     const result = matchRuleV003(payload, rules);
@@ -231,10 +250,11 @@ describe('matchRuleV003', () => {
 
     const rules: RuleV003[] = [
       {
+        ...defaultRuleV003,
         name: 'deep-path',
         jsonPath: '$.level1.level2.level3.value',
         promptTemplate: 'Value: ${$}',
-      },
+      } as RuleV003,
     ];
 
     const result = matchRuleV003(payload, rules);

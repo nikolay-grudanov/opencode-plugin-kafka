@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { SDKClient, TextMessagePart, MessagePart, Session, AssistantMessage } from '../../../src/types/opencode-sdk.js';
+import type { SDKClient, MessagePart, Session, AssistantMessage } from '../../../src/types/opencode-sdk.js';
 import type { IOpenCodeAgent } from '../../../src/opencode/IOpenCodeAgent.js';
 
 describe('extractResponseText', () => {
@@ -15,10 +15,10 @@ describe('extractResponseText', () => {
   it('должен извлекать текст из text parts', () => {
     // Этот тест проверяет логику через вызов реального метода
     const parts: MessagePart[] = [
-      { type: 'text', text: 'Hello' },
+      { type: 'text' as const, text: 'Hello' },
     ];
 
-    const textParts = parts.filter((part): part is TextMessagePart => part.type === 'text');
+    const textParts = parts.filter((part) => part.type === 'text') as MessagePart[];
     const result = textParts.map(part => part.text).join('\n\n');
 
     expect(result).toBe('Hello');
@@ -26,11 +26,11 @@ describe('extractResponseText', () => {
 
   it('должен объединять несколько text parts через двойной перевод строки', () => {
     const parts: MessagePart[] = [
-      { type: 'text', text: 'First part' },
-      { type: 'text', text: 'Second part' },
+      { type: 'text' as const, text: 'First part' },
+      { type: 'text' as const, text: 'Second part' },
     ];
 
-    const textParts = parts.filter((part): part is TextMessagePart => part.type === 'text');
+    const textParts = parts.filter((part) => part.type === 'text') as MessagePart[];
     const result = textParts.map(part => part.text).join('\n\n');
 
     expect(result).toBe('First part\n\nSecond part');
@@ -39,7 +39,7 @@ describe('extractResponseText', () => {
   it('должен возвращать пустую строку для пустого массива parts', () => {
     const parts: MessagePart[] = [];
 
-    const textParts = parts.filter((part): part is TextMessagePart => part.type === 'text');
+    const textParts = parts.filter((part) => part.type === 'text') as MessagePart[];
     const result = textParts.map(part => part.text).join('\n\n');
 
     expect(result).toBe('');
@@ -47,11 +47,11 @@ describe('extractResponseText', () => {
 
   it('должен пропускать non-text parts', () => {
     const parts: MessagePart[] = [
-      { type: 'text', text: 'Text content' },
-      { type: 'tool-call', toolCallId: 'call-123', toolName: 'tool', input: {} },
+      { type: 'text' as const, text: 'Text content' },
+      { type: 'code' as const, code: 'console.log("test")', language: 'javascript' },
     ];
 
-    const textParts = parts.filter((part): part is TextMessagePart => part.type === 'text');
+    const textParts = parts.filter((part) => part.type === 'text') as MessagePart[];
     const result = textParts.map(part => part.text).join('\n\n');
 
     expect(result).toBe('Text content');
@@ -59,11 +59,11 @@ describe('extractResponseText', () => {
 
   it('должен обрабатывать массив только с non-text типами', () => {
     const parts: MessagePart[] = [
-      { type: 'tool-call', toolCallId: 'call-123', toolName: 'tool', input: {} },
-      { type: 'tool-result', toolCallId: 'call-123', result: { foo: 'bar' } },
+      { type: 'code' as const, code: 'console.log("test")', language: 'javascript' },
+      { type: 'image' as const, filePath: '/image.png' },
     ];
 
-    const textParts = parts.filter((part): part is TextMessagePart => part.type === 'text');
+    const textParts = parts.filter((part) => part.type === 'text') as MessagePart[];
     const result = textParts.map(part => part.text).join('\n\n');
 
     expect(result).toBe('');
@@ -72,27 +72,29 @@ describe('extractResponseText', () => {
 
 // Мок SDK клиента
 function createMockSDKClient(overrides?: {
-  createSession?: () => Promise<Session>;
-  promptSession?: () => Promise<AssistantMessage>;
-  abortSession?: () => Promise<boolean>;
-  deleteSession?: () => Promise<boolean>;
+  createSession?: () => Promise<{ data: Session; error: null }>;
+  promptSession?: () => Promise<{ data: AssistantMessage; error: null }>;
+  abortSession?: () => Promise<{ data: boolean; error: null }>;
+  deleteSession?: () => Promise<{ data: boolean; error: null }>;
+  messagesSession?: () => Promise<{ data: never[]; error: null }>;
 }): SDKClient {
   return {
     session: {
-      create: overrides?.createSession ?? vi.fn().mockResolvedValue({ id: 'session-123' }),
-      prompt: vi.fn(
-        // @ts-expect-error: мок функция с динамическим возвращаемым значением
-        overrides?.promptSession ?? (() => Promise.resolve({ role: 'assistant', parts: [{ type: 'text', text: 'response' }] }))
-      ),
-      abort: overrides?.abortSession ?? vi.fn().mockResolvedValue(true),
-      delete: overrides?.deleteSession ?? vi.fn().mockResolvedValue(true),
+      create: overrides?.createSession ?? vi.fn().mockResolvedValue({ data: { id: 'session-123' }, error: null }),
+      prompt: overrides?.promptSession ?? vi.fn().mockResolvedValue({
+        data: { role: 'assistant', parts: [{ type: 'text', text: 'response' }] },
+        error: null
+      }),
+      abort: overrides?.abortSession ?? vi.fn().mockResolvedValue({ data: true, error: null }),
+      delete: overrides?.deleteSession ?? vi.fn().mockResolvedValue({ data: true, error: null }),
+      messages: overrides?.messagesSession ?? vi.fn().mockResolvedValue({ data: [], error: null }),
     },
   };
 }
 
 describe('OpenCodeAgentAdapter', () => {
   let OpenCodeAgentAdapter: new (client: SDKClient) => IOpenCodeAgent;
-  let extractResponseText: (parts: Array<{type: string; text?: string}>) => string;
+  let extractResponseText: (parts: MessagePart[]) => string;
 
   beforeEach(async () => {
     // Динамический импорт модуля после моков
@@ -118,7 +120,9 @@ describe('OpenCodeAgentAdapter', () => {
 
   it('должен возвращать результат timeout когда SDK превышает timeoutMs', async () => {
     const mockClient = createMockSDKClient({
-      promptSession: () => new Promise((resolve) => setTimeout(resolve, 200)),
+      promptSession: () => new Promise((resolve) => setTimeout(resolve, 200)).then(
+        () => ({ data: { role: 'assistant', parts: [{ type: 'text', text: 'response' }] }, error: null })
+      ),
     });
 
     const adapter = new OpenCodeAgentAdapter(mockClient);
@@ -141,10 +145,12 @@ describe('OpenCodeAgentAdapter', () => {
   });
 
   it('должен пытаться вызвать abort при timeout', async () => {
-    const abortSpy = vi.fn().mockResolvedValue(true);
+    const abortSpy = vi.fn().mockResolvedValue({ data: true, error: null });
 
     const mockClient = createMockSDKClient({
-      promptSession: () => new Promise((resolve) => setTimeout(resolve, 200)),
+      promptSession: () => new Promise((resolve) => setTimeout(resolve, 200)).then(
+        () => ({ data: { role: 'assistant', parts: [{ type: 'text', text: 'response' }] }, error: null })
+      ),
       abortSession: abortSpy,
     });
 
@@ -152,11 +158,11 @@ describe('OpenCodeAgentAdapter', () => {
     const result = await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 50 });
 
     expect(result.status).toBe('timeout');
-    expect(abortSpy).toHaveBeenCalledWith(expect.objectContaining({ path: { id: 'session-123' } }));
+    expect(abortSpy).toHaveBeenCalledWith({ path: { id: 'session-123' } });
   });
 
   it('должен пытаться вызвать delete при error', async () => {
-    const deleteSpy = vi.fn().mockResolvedValue(true);
+    const deleteSpy = vi.fn().mockResolvedValue({ data: true, error: null });
 
     const mockClient = createMockSDKClient({
       promptSession: () => Promise.reject(new Error('Prompt API failed')),
@@ -167,11 +173,14 @@ describe('OpenCodeAgentAdapter', () => {
     const result = await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 5000 });
 
     expect(result.status).toBe('error');
-    expect(deleteSpy).toHaveBeenCalled();
+    expect(deleteSpy).toHaveBeenCalledWith({ path: { id: 'session-123' } });
   });
 
   it('должен передавать agentId в SDK prompt', async () => {
-    const promptSpy = vi.fn().mockResolvedValue({ role: 'assistant', parts: [{ type: 'text', text: 'response' }] });
+    const promptSpy = vi.fn().mockResolvedValue({
+      data: { role: 'assistant', parts: [{ type: 'text', text: 'response' }] },
+      error: null
+    });
 
     const mockClient = createMockSDKClient({
       promptSession: promptSpy as never,
@@ -190,13 +199,14 @@ describe('OpenCodeAgentAdapter', () => {
   });
 
   it('никогда не бросает исключения даже при катастрофическом сбое SDK', async () => {
+    // Используем any для bypass проверки типов - это тест на runtime behavior
     const crashClient: SDKClient = {
       session: {
-        create: () => Promise.reject(new Error('Catastrophic failure')),
-        // @ts-expect-error: intentionally broken mock
-        prompt: () => { throw new Error('Should not reach here'); },
-        abort: () => Promise.reject(new Error('Abort failed')),
-        delete: () => Promise.reject(new Error('Delete failed')),
+        create: () => Promise.resolve({ data: { id: 'session-123' }, error: null }),
+        prompt: (() => { throw new Error('Should not reach here'); }) as never,
+        abort: () => Promise.resolve({ data: false, error: new Error('Abort failed') }) as never,
+        delete: () => Promise.resolve({ data: false, error: new Error('Delete failed') }) as never,
+        messages: () => Promise.resolve({ data: [], error: null }),
       },
     };
 
@@ -221,7 +231,7 @@ describe('OpenCodeAgentAdapter', () => {
   });
 
   it('abort возвращает true при успешном abort', async () => {
-    const abortSpy = vi.fn().mockResolvedValue(true);
+    const abortSpy = vi.fn().mockResolvedValue({ data: true, error: null });
     const mockClient = createMockSDKClient({
       abortSession: abortSpy,
     });
@@ -230,7 +240,7 @@ describe('OpenCodeAgentAdapter', () => {
     const result = await adapter.abort('session-123');
 
     expect(result).toBe(true);
-    expect(abortSpy).toHaveBeenCalledWith(expect.objectContaining({ path: { id: 'session-123' } }));
+    expect(abortSpy).toHaveBeenCalledWith({ path: { id: 'session-123' } });
   });
 
   it('abort возвращает false при ошибке abort', async () => {
@@ -250,12 +260,16 @@ describe('OpenCodeAgentAdapter', () => {
     // Мокаем SDK с медленным prompt и падающим abort
     const errorClient = {
       session: {
-        create: vi.fn().mockResolvedValue({ id: 'session-123' }),
+        create: vi.fn().mockResolvedValue({ data: { id: 'session-123' }, error: null }),
         prompt: vi.fn().mockImplementation(() => new Promise((resolve) => 
-          setTimeout(() => resolve({ role: 'assistant', parts: [{ type: 'text', text: 'response' }] }), 100)
+          setTimeout(() => resolve({
+            data: { role: 'assistant', parts: [{ type: 'text', text: 'response' }] },
+            error: null
+          }), 100)
         )),
         abort: vi.fn().mockRejectedValue(new Error('Abort failed')), // abort выбросит ошибку в cleanup
         delete: vi.fn().mockRejectedValue(new Error('Delete failed')),
+        messages: vi.fn().mockResolvedValue({ data: [], error: null }),
       },
     };
 
@@ -272,9 +286,9 @@ describe('OpenCodeAgentAdapter', () => {
   it('extractResponseText экспортируемая pure function', () => {
     expect(typeof extractResponseText).toBe('function');
 
-    const parts: Array<{ type: string; text?: string }> = [
-      { type: 'text', text: 'Hello' },
-      { type: 'text', text: 'World' },
+    const parts: MessagePart[] = [
+      { type: 'text' as const, text: 'Hello' },
+      { type: 'text' as const, text: 'World' },
     ];
 
     const result = extractResponseText(parts);
@@ -286,10 +300,10 @@ describe('extractResponseText standalone', () => {
   it('экспортируется и работает как standalone функция', async () => {
     const { extractResponseText } = await import('../../../src/opencode/utils.js');
 
-    const parts: Array<{ type: string; text?: string }> = [
-      { type: 'text', text: 'Line 1' },
-      { type: 'text', text: 'Line 2' },
-      { type: 'text', text: 'Line 3' },
+    const parts = [
+      { type: 'text' as const, text: 'Line 1' },
+      { type: 'text' as const, text: 'Line 2' },
+      { type: 'text' as const, text: 'Line 3' },
     ];
 
     const result = extractResponseText(parts);

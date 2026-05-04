@@ -3,11 +3,12 @@
   "instructions": [".opencode/rules/*.md"],
   "permission":
     { 
-        "graphify*": "allow"
+        "graphify*": "allow",
+        "mempalace*": "deny"
     },
   "agent": {
     "general": {
-      "model": "minimax-coding-plan/MiniMax-M2.7",
+      "model": "minimax-coding-plan/MiniMax-M2.5",
       "permission": {
         "*": "allow"
       }

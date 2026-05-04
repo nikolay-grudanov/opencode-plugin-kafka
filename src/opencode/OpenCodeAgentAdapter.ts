@@ -38,6 +38,14 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
    * @returns результат выполнения агента
    */
   async invoke(prompt: string, agentId: string, options: InvokeOptions): Promise<AgentResult> {
+    // Валидация входных параметров
+    if (!prompt?.trim()) {
+      return { status: 'error', errorMessage: 'Prompt cannot be empty', sessionId: '', executionTimeMs: 0, timestamp: new Date().toISOString() };
+    }
+    if (!agentId?.trim()) {
+      return { status: 'error', errorMessage: 'Agent ID cannot be empty', sessionId: '', executionTimeMs: 0, timestamp: new Date().toISOString() };
+    }
+
     const startTime = Date.now();
     let sessionId = '';
 
@@ -45,7 +53,10 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
       // 1. Создаём новую сессию
       // hey-api wrapper возвращает { data: { id: ... }, error: null }
       const session = await this.client.session.create({ body: { title: `kafka-plugin-${agentId}` } });
-      sessionId = session.data?.id ?? session.id;
+      sessionId = session.data?.id ?? '';
+      if (!sessionId) {
+        return { status: 'error', errorMessage: 'Empty session ID from SDK', sessionId: '', executionTimeMs: Date.now() - startTime, timestamp: new Date().toISOString() };
+      }
 
       // 2. Устанавливаем timeout (по умолчанию 120 сек)
       const timeoutMs = options.timeoutMs ?? 120000;
@@ -78,7 +89,7 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
 
       // 5. Извлекаем текст из ответа
       // hey-api wrapper возвращает { data: { parts: [...] }, error: null }
-      const parts = response?.data?.parts ?? response?.parts ?? [];
+      const parts = response?.data?.parts ?? [];
       const responseText = extractResponseText(parts);
 
       // 6. Успешный результат

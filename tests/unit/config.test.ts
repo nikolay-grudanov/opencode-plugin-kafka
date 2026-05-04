@@ -310,6 +310,8 @@ describe('parseConfig', () => {
             promptTemplate: 'Process {$.status}',
             agentId: 'agent-1',
             responseTopic: 'output-topic-1',
+            timeoutMs: 120_000,
+            concurrency: 1,
           },
           {
             name: 'rule2',
@@ -317,6 +319,8 @@ describe('parseConfig', () => {
             promptTemplate: 'Handle {$.type}',
             agentId: 'agent-2',
             responseTopic: 'output-topic-2',
+            timeoutMs: 120_000,
+            concurrency: 1,
           },
         ],
       };
@@ -334,6 +338,8 @@ describe('parseConfig', () => {
             promptTemplate: 'Process {$.status}',
             agentId: 'agent-1',
             responseTopic: 'input-topic-1', // совпадает с input topic!
+            timeoutMs: 120_000,
+            concurrency: 1,
           },
         ],
       };
@@ -354,6 +360,8 @@ describe('parseConfig', () => {
             promptTemplate: 'Process {$.status}',
             agentId: 'agent-1',
             // responseTopic не указан (undefined)
+            timeoutMs: 120_000,
+            concurrency: 1,
           },
           {
             name: 'rule2',
@@ -361,6 +369,8 @@ describe('parseConfig', () => {
             promptTemplate: 'Handle {$.type}',
             agentId: 'agent-2',
             // responseTopic не указан (undefined)
+            timeoutMs: 120_000,
+            concurrency: 1,
           },
         ],
       };
@@ -378,6 +388,8 @@ describe('parseConfig', () => {
             promptTemplate: 'Process {$.status}',
             agentId: 'agent-1',
             responseTopic: 'topic-b', // конфликт
+            timeoutMs: 120_000,
+            concurrency: 1,
           },
         ],
       };
@@ -403,6 +415,8 @@ describe('parseConfig', () => {
               jsonPath: '$.status',
               promptTemplate: 'Process {$.status}',
               agentId: 'agent1',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
             {
               name: 'rule2',
@@ -410,6 +424,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Handle {$.type}',
               agentId: 'agent2',
               responseTopic: 'response-topic',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -434,6 +450,8 @@ describe('parseConfig', () => {
               jsonPath: '$.test',
               promptTemplate: 'Test',
               agentId: 'agent1',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -457,6 +475,8 @@ describe('parseConfig', () => {
               jsonPath: '$.test',
               promptTemplate: 'Test',
               agentId: 'agent1',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -498,6 +518,8 @@ describe('parseConfig', () => {
               jsonPath: '$.status',
               promptTemplate: 'Process',
               agentId: 'agent1',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
             {
               name: 'rule2',
@@ -505,6 +527,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Handle',
               agentId: 'agent2',
               responseTopic: 'response-topic',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -524,6 +548,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Process',
               agentId: 'agent1',
               responseTopic: 'input-topic', // совпадает с input topic!
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -543,6 +569,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Process',
               agentId: 'agent1',
               responseTopic: 'valid-response',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
             {
               name: 'rule2',
@@ -550,6 +578,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Handle',
               agentId: 'agent2',
               responseTopic: 'topic-a', // конфликт!
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -569,6 +599,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Process',
               agentId: 'agent1',
               // responseTopic не указан (undefined)
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -590,6 +622,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Process',
               agentId: 'agent1',
               responseTopic: undefined, // undefined - не конфликт
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -611,6 +645,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Process',
               agentId: 'agent1',
               responseTopic: 'a', // Минимум 1 символ - валидно
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };

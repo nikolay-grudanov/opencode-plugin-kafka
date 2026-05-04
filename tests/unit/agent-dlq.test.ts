@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
 import type { PluginConfigV003, RuleV003 } from '../../src/schemas/index.js';
-import type { Producer } from 'kafkajs';
+import type { EachMessagePayload, Producer } from 'kafkajs';
 import type { IOpenCodeAgent } from '../../src/opencode/IOpenCodeAgent.js';
 
 /**
@@ -58,6 +58,7 @@ describe('Agent Error/Timeout → DLQ', () => {
         promptTemplate: 'Process: ${$}',
         agentId: 'test-agent',
         timeoutMs: 30000,
+        concurrency: 1,
       },
     ];
 
@@ -108,6 +109,7 @@ describe('Agent Error/Timeout → DLQ', () => {
       };
 
       await eachMessageHandler(
+        // @ts-ignore - mock payload неполный
         payload,
         mockConfig,
         mockDlqProducer,
@@ -151,16 +153,17 @@ describe('Agent Error/Timeout → DLQ', () => {
         topic: 'test-topic',
         partition: 0,
         message: {
-          value: Buffer.from('{"test": "value"}'),
-          offset: '10',
+value: Buffer.from('{"test": "value"}'),
+          offset: '42',
           key: null,
           headers: {},
           timestamp: '2024-04-22T00:00:00.000Z',
-        },
+},
       };
 
+      /* eslint-disable @typescript-eslint/no-explicit-any */
       await eachMessageHandler(
-        payload,
+        payload as any as EachMessagePayload,
         mockConfig,
         mockDlqProducer,
         mockCommitOffsets,
@@ -169,8 +172,9 @@ describe('Agent Error/Timeout → DLQ', () => {
         mockResponseProducer,
         activeSessions
       );
+      /* eslint-enable @typescript-eslint/no-explicit-any */
 
-      // Проверяем sendToDlq
+      // Проверяем что Producer.send был вызван
       expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
 
       const sendCall = vi.mocked(mockDlqProducer.send).mock.calls[0];
@@ -207,8 +211,9 @@ describe('Agent Error/Timeout → DLQ', () => {
         },
       };
 
+      /* eslint-disable @typescript-eslint/no-explicit-any */
       await eachMessageHandler(
-        payload,
+        payload as any as EachMessagePayload,
         mockConfig,
         mockDlqProducer,
         mockCommitOffsets,
@@ -217,6 +222,7 @@ describe('Agent Error/Timeout → DLQ', () => {
         mockResponseProducer,
         activeSessions
       );
+      /* eslint-enable @typescript-eslint/no-explicit-any */
 
       // Проверяем что Producer.send был вызван
       expect(mockDlqProducer.send).toHaveBeenCalledTimes(1);
@@ -250,9 +256,9 @@ describe('Agent Error/Timeout → DLQ', () => {
       const payload = {
         topic: 'test-topic',
         partition: 0,
-        message: {
+message: {
           value: Buffer.from('{"test": "value"}'),
-          offset: '20',
+          offset: '10',
           key: null,
           headers: {},
           timestamp: '2024-04-22T00:00:00.000Z',
@@ -260,7 +266,7 @@ describe('Agent Error/Timeout → DLQ', () => {
       };
 
       await eachMessageHandler(
-        payload,
+        payload as unknown as EachMessagePayload,
         mockConfig,
         mockDlqProducer,
         mockCommitOffsets,
@@ -298,9 +304,9 @@ describe('Agent Error/Timeout → DLQ', () => {
       const payload = {
         topic: 'test-topic',
         partition: 0,
-        message: {
+message: {
           value: Buffer.from('{"test": "value"}'),
-          offset: '0',
+          offset: '42',
           key: null,
           headers: {},
           timestamp: '2024-04-22T00:00:00.000Z',
@@ -308,7 +314,7 @@ describe('Agent Error/Timeout → DLQ', () => {
       };
 
       await eachMessageHandler(
-        payload,
+        payload as unknown as EachMessagePayload,
         mockConfig,
         mockDlqProducer,
         mockCommitOffsets,
