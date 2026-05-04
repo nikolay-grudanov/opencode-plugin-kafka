@@ -138,6 +138,17 @@ describe('Kafka consumer E2E', () => {
 
     // 3. Stop Redpanda
     await stopRedpanda(redpandaContainer);
+
+    // 4. Force cleanup any remaining Redpanda containers (Podman compatibility)
+    try {
+      const { execSync } = require('child_process');
+      execSync('podman rm -f $(podman ps -aq --filter ancestor=docker.redpanda.com/redpandadata/redpanda:latest) 2>/dev/null || true', {
+        stdio: 'ignore',
+        timeout: 10000,
+      });
+    } catch {
+      // Ignore cleanup errors
+    }
   });
 
   test(
@@ -317,8 +328,8 @@ describe('Kafka consumer E2E', () => {
         value: JSON.stringify(matchingMessage),
       });
 
-      // 8. Consume response (with generous timeout for E2E)
-      const responseMessage = await consumeOneMessage(brokers, ROUTING_RESPONSE_TOPIC, 90_000);
+      // 8. Consume response (with generous timeout for E2E, fromBeginning=true to catch already-produced response)
+      const responseMessage = await consumeOneMessage(brokers, ROUTING_RESPONSE_TOPIC, 90_000, true);
       expect(responseMessage).not.toBeNull();
 
       // 9. Parse and assert response
@@ -366,7 +377,7 @@ describe('Kafka consumer E2E', () => {
       });
 
       // 6. Consume from DLQ (timeout message should appear)
-      const dlqMessage = await consumeOneMessage(brokers, TIMEOUT_DLQ_TOPIC, 30_000);
+      const dlqMessage = await consumeOneMessage(brokers, TIMEOUT_DLQ_TOPIC, 30_000, true);
       expect(dlqMessage).not.toBeNull();
 
       // 7. Parse and assert DLQ envelope
@@ -383,7 +394,7 @@ describe('Kafka consumer E2E', () => {
       });
 
       // 9. Consume second DLQ message — proves consumer is still alive
-      const secondDlqMessage = await consumeOneMessage(brokers, TIMEOUT_DLQ_TOPIC, 30_000);
+      const secondDlqMessage = await consumeOneMessage(brokers, TIMEOUT_DLQ_TOPIC, 30_000, true);
       expect(secondDlqMessage).not.toBeNull();
       const secondEnvelope = JSON.parse(secondDlqMessage!.value!.toString());
       expect(secondEnvelope.topic).toBe(TIMEOUT_INPUT_TOPIC);
@@ -429,8 +440,8 @@ describe('Kafka consumer E2E', () => {
         value: JSON.stringify(extractionMessage),
       });
 
-      // 6. Consume response (with generous timeout for E2E)
-      const responseMessage = await consumeOneMessage(brokers, EXTRACTION_RESPONSE_TOPIC, 90_000);
+      // 6. Consume response (with generous timeout for E2E, fromBeginning=true to catch already-produced response)
+      const responseMessage = await consumeOneMessage(brokers, EXTRACTION_RESPONSE_TOPIC, 90_000, true);
       expect(responseMessage).not.toBeNull();
 
       // 7. Parse and assert response
@@ -485,7 +496,8 @@ describe('Kafka consumer E2E', () => {
       const responseMessage = await consumeOneMessage(
         brokers,
         MINIMAL_RESPONSE_TOPIC,
-        90_000
+        90_000,
+        true // fromBeginning=true to catch already-produced response
       );
       expect(responseMessage).not.toBeNull();
 
@@ -605,7 +617,7 @@ describe('Kafka consumer E2E', () => {
       });
 
       // 6. Consume from DLQ — should contain parse error
-      const dlqMessage = await consumeOneMessage(brokers, INVALID_DLQ_TOPIC, 30_000);
+      const dlqMessage = await consumeOneMessage(brokers, INVALID_DLQ_TOPIC, 30_000, true);
       expect(dlqMessage).not.toBeNull();
 
       const dlqEnvelope = JSON.parse(dlqMessage!.value!.toString());
@@ -619,7 +631,7 @@ describe('Kafka consumer E2E', () => {
       });
 
       // 8. Consume response — should succeed (consumer didn't crash)
-      const responseMessage = await consumeOneMessage(brokers, INVALID_RESPONSE_TOPIC, 90_000);
+      const responseMessage = await consumeOneMessage(brokers, INVALID_RESPONSE_TOPIC, 90_000, true);
       expect(responseMessage).not.toBeNull();
 
       const response = JSON.parse(responseMessage!.value!.toString());

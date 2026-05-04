@@ -57,6 +57,31 @@ async function createTopics(brokers: string[], topics: string[]): Promise<void> 
 }
 
 /**
+ * Удаляет Kafka топики через admin client.
+ * @param brokers - список брокеров Kafka
+ * @param topics - названия топиков для удаления
+ */
+async function deleteTopics(brokers: string[], topics: string[]): Promise<void> {
+  const kafka = new Kafka({
+    clientId: 'e2e-delete-topics',
+    brokers,
+  });
+
+  const admin = kafka.admin();
+  await admin.connect();
+
+  try {
+    await admin.deleteTopics({ topics }).catch(() => {});
+  } finally {
+    try {
+      await admin.disconnect();
+    } catch {
+      // Ignore disconnect errors
+    }
+  }
+}
+
+/**
  * Отправляет одно сообщение в указанный топик.
  * @param brokers - список брокеров Kafka
  * @param topic - название топика
@@ -122,7 +147,8 @@ async function produceMessage(
 async function consumeOneMessage(
   brokers: string[],
   topic: string,
-  timeoutMs: number = 30_000
+  timeoutMs: number = 30_000,
+  fromBeginning: boolean = false
 ): Promise<KafkaMessage | null> {
   const kafka = new Kafka({
     clientId: 'e2e-consume-message',
@@ -134,7 +160,7 @@ async function consumeOneMessage(
   });
 
   await consumer.connect();
-  await consumer.subscribe({ topic, fromBeginning: true });
+  await consumer.subscribe({ topic, fromBeginning });
 
   let result: KafkaMessage | null = null;
   let resolveRun: () => void;
@@ -261,5 +287,5 @@ async function consumeMessages(
   return messages;
 }
 
-export { createTopics, produceMessage, consumeOneMessage, consumeMessages };
+export { createTopics, deleteTopics, produceMessage, consumeOneMessage, consumeMessages };
 export type { KafkaTestMessage, KafkaMessage };
