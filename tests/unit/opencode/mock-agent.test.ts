@@ -188,7 +188,7 @@ describe('MockOpenCodeAgent - signal abort', () => {
   it('должен возвращать error при abort signal во время delay', async () => {
     const controller = new AbortController();
     const agent = new MockOpenCodeAgent([
-      { agentId: 'slow-agent', response: 'test', delayMs: 5000 },
+      { agentId: 'slow-agent', response: 'test', delayMs: 500 },
     ]);
 
     setTimeout(() => controller.abort(), 50);
@@ -228,7 +228,7 @@ describe('MockOpenCodeAgent - default values', () => {
 
   it('abort должен возвращать true для активной сессии', async () => {
     const agent = new MockOpenCodeAgent([
-      { agentId: 'test-agent', response: 'test', delayMs: 5000 },
+      { agentId: 'test-agent', response: 'test', delayMs: 100 },
     ]);
 
     // Запускаем long-running invoke
