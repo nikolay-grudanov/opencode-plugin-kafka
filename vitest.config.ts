@@ -8,6 +8,7 @@ export default defineConfig({
         singleFork: true,
       },
     },
+    fileParallelism: false,
     globals: true,
     environment: 'node',
     exclude: [
@@ -18,27 +19,27 @@ export default defineConfig({
       '.opencode/**',
       'dist/**',
     ],
-  },
-coverage: {
-    provider: 'v8',
-    reporter: ['text', 'json', 'html'],
-    exclude: [
-      'src/core/index.ts',
-      'src/opencode/IOpenCodeAgent.ts',
-      'src/types/**',
-      'src/schemas/index.ts',
-      'src/kafka/consumer.ts',
-      'tests/**',
-      'dist/**',
-      'node_modules/**',
-      '**/parse-cov.cjs',
-      'vitest*.config.ts',
-    ],
-    thresholds: {
-      lines: 90,
-      branches: 90,
-      functions: 88, // 88.46% фактически - баг v8 exclude
-      statements: 90,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      exclude: [
+        'src/core/index.ts',
+        'src/opencode/IOpenCodeAgent.ts',
+        'src/types/**',
+        'src/schemas/index.ts',
+        'src/kafka/consumer.ts',
+        'tests/**',
+        'dist/**',
+        'node_modules/**',
+        '**/parse-cov.cjs',
+        'vitest*.config.ts',
+      ],
+      thresholds: {
+        lines: 90,
+        branches: 90,
+        functions: 88,
+        statements: 90,
+      },
     },
   },
 });
