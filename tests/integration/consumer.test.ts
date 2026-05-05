@@ -96,7 +96,7 @@ class MockStartedTestContainer {
     }
   }
 
-  async stop(options?: unknown): Promise<StoppedTestContainer> {
+  async stop(_options?: unknown): Promise<StoppedTestContainer> {
     if (this.mockProducer) {
       await this.mockProducer.disconnect();
     }

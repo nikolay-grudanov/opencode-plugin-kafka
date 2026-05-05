@@ -488,7 +488,7 @@ const rule: RuleV003 = {
         name: 'timeout-rule',
         jsonPath: '$.type',
         promptTemplate: 'Process ${$.type}',
-        agentId: 'timeout-agent',
+        agentId: 'error-agent',
         responseTopic: TEST_RESPONSE_TOPIC,
         timeoutMs: 30_000,
         concurrency: 1,
