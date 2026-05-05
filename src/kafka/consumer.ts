@@ -473,6 +473,7 @@ export async function eachMessageHandler(
       // Отправляем response если правило имеет responseTopic
       if (matchedRule.responseTopic) {
         await sendResponse(responseProducer, matchedRule.responseTopic, {
+          correlationId: (parsedPayload as { correlationId?: string }).correlationId,
           messageKey: sessionId,
           sessionId,
           ruleName: matchedRule.name,

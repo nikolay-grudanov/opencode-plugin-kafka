@@ -149,7 +149,7 @@ async function consumeOneMessage(
   brokers: string[],
   topic: string,
   timeoutMs: number = 30_000,
-  fromBeginning: boolean = false
+  fromBeginning: boolean = true
 ): Promise<KafkaMessage | null> {
   const kafka = new Kafka({
     clientId: 'e2e-consume-message',
@@ -243,7 +243,7 @@ const consumer = kafka.consumer({
     });
 
   await consumer.connect();
-  await consumer.subscribe({ topic, fromBeginning: false });
+  await consumer.subscribe({ topic, fromBeginning: true });
 
   const messages: KafkaMessage[] = [];
   let resolveRun: () => void;

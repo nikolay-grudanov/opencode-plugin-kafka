@@ -21,7 +21,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@opencode-ai/sdk": "latest",
+    "@opencode-ai/sdk": "^1.14.37",
     "@testcontainers/redpanda": "^11.14.0",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^8.59.0",

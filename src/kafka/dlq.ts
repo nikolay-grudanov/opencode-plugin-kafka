@@ -46,6 +46,9 @@ export interface DlqEnvelope {
   /** Оригинальное значение сообщения (может быть null для tombstone) */
   originalValue: string | null;
 
+  /** Alias для originalValue — имя поля ожидаемое E2E тестами */
+  failedMessage: string | null;
+
   /** Имя оригинального топика */
   topic: string;
 
@@ -107,6 +110,7 @@ export async function sendToDlq(
     const sanitizedErrorMessage = sanitizeErrorMessage(error.message);
     const envelope: DlqEnvelope = {
       originalValue: originalMessage.value,
+      failedMessage: originalMessage.value,
       topic: originalMessage.topic,
       partition: originalMessage.partition,
       offset: String(originalMessage.offset),

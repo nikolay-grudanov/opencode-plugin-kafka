@@ -1,0 +1,16 @@
+{
+  "version": "003",
+  "topics": ["e2e-debug-input"],
+  "dlqTopic": "e2e-debug-input-dlq",
+  "rules": [
+    {
+      "name": "debug-rule",
+      "jsonPath": "$.task",
+      "promptTemplate": "Выполни задачу: {{task}}",
+      "agentId": "e2e-responder",
+      "responseTopic": "e2e-debug-response",
+      "timeoutMs": 60000,
+      "topic": "e2e-debug-input"
+    }
+  ]
+}
