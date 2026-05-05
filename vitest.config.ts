@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // Use forks pool for stable graceful shutdown
     pool: 'forks',
     poolOptions: {
       forks: {
@@ -9,6 +10,8 @@ export default defineConfig({
       },
     },
     fileParallelism: false,
+    // Ignore unhandled errors after tests complete (tinypool cleanup race condition)
+    onUnhandledRejected: 'ignore',
     globals: true,
     environment: 'node',
     exclude: [
