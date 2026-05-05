@@ -46,7 +46,7 @@ export interface ResponseMessage {
 export async function sendResponse(
   producer: Producer,
   topic: string,
-  message: ResponseMessage,
+  message: ResponseMessage
 ): Promise<void> {
   try {
     await producer.send({
@@ -61,12 +61,14 @@ export async function sendResponse(
     });
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error(JSON.stringify({
-      level: 'error',
-      event: 'response_send_failed',
-      topic,
-      errorMessage: errMsg,
-      timestamp: new Date().toISOString(),
-    }));
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        event: 'response_send_failed',
+        topic,
+        errorMessage: errMsg,
+        timestamp: new Date().toISOString(),
+      })
+    );
   }
 }

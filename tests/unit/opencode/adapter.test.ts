@@ -309,4 +309,179 @@ describe('extractResponseText standalone', () => {
     const result = extractResponseText(parts);
     expect(result).toBe('Line 1\n\nLine 2\n\nLine 3');
   });
+
+  it('должен обрабатывать text part с undefined text (ветка ?? "")', async () => {
+    const { extractResponseText } = await import('../../../src/opencode/utils.js');
+    const parts = [{ type: 'text' as const, text: undefined as unknown as string }];
+    const result = extractResponseText(parts);
+    expect(result).toBe('');
+  });
+});
+
+// ========================================================================
+// Новые тесты для покрытия (добавлены для достижения 90%+ coverage)
+// ========================================================================
+
+describe('OpenCodeAgentAdapter - валидация ввода', () => {
+  let OpenCodeAgentAdapter: new (client: SDKClient) => IOpenCodeAgent;
+
+  beforeEach(async () => {
+    const module = await import('../../../src/opencode/OpenCodeAgentAdapter.js');
+    OpenCodeAgentAdapter = module.OpenCodeAgentAdapter;
+  });
+
+  it('должен возвращать error при пустом prompt', async () => {
+    const mockClient = createMockSDKClient();
+    const adapter = new OpenCodeAgentAdapter(mockClient);
+
+    const result = await adapter.invoke('', 'test-agent', { timeoutMs: 5000 });
+
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toBe('Prompt cannot be empty');
+  });
+
+  it('должен возвращать error при prompt только с пробелами', async () => {
+    const mockClient = createMockSDKClient();
+    const adapter = new OpenCodeAgentAdapter(mockClient);
+
+    const result = await adapter.invoke('   ', 'test-agent', { timeoutMs: 5000 });
+
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toBe('Prompt cannot be empty');
+  });
+
+  it('должен возвращать error при пустом agentId', async () => {
+    const mockClient = createMockSDKClient();
+    const adapter = new OpenCodeAgentAdapter(mockClient);
+
+    const result = await adapter.invoke('test', '', { timeoutMs: 5000 });
+
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toBe('Agent ID cannot be empty');
+  });
+
+  it('должен возвращать error при agentId только с пробелами', async () => {
+    const mockClient = createMockSDKClient();
+    const adapter = new OpenCodeAgentAdapter(mockClient);
+
+    const result = await adapter.invoke('test', '   ', { timeoutMs: 5000 });
+
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toBe('Agent ID cannot be empty');
+  });
+
+  it('должен возвращать error при пустом sessionId от SDK', async () => {
+    const mockClient = createMockSDKClient({
+      createSession: () => Promise.resolve({ data: { id: '' }, error: null }),
+    });
+    const adapter = new OpenCodeAgentAdapter(mockClient);
+
+    const result = await adapter.invoke('test', 'agent', { timeoutMs: 5000 });
+
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toBe('Empty session ID from SDK');
+  });
+
+  it('должен возвращать error при уже прерванном signal до вызова invoke', async () => {
+    const mockClient = createMockSDKClient();
+    const adapter = new OpenCodeAgentAdapter(mockClient);
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await adapter.invoke('test', 'agent', { timeoutMs: 5000, signal: controller.signal });
+
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toBe('Operation was aborted');
+  });
+
+it('должен возвращать error при abort signal во время выполнения prompt', async () => {
+    const mockClient = createMockSDKClient({
+      promptSession: () => new Promise((resolve) => {
+        setTimeout(() => resolve({
+          data: { role: 'assistant', parts: [{ type: 'text', text: 'response' }] },
+          error: null
+        }), 500);
+      }),
+    });
+    const adapter = new OpenCodeAgentAdapter(mockClient);
+
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 50);
+
+    const result = await adapter.invoke('test', 'agent', { timeoutMs: 5000, signal: controller.signal });
+
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toBe('Operation was aborted');
+  });
+
+  it('abort возвращает boolean', async () => {
+    const mockClient = createMockSDKClient();
+    const adapter = new OpenCodeAgentAdapter(mockClient);
+
+    const abortResult = await adapter.abort('session-123');
+
+    expect(typeof abortResult).toBe('boolean');
+});
+});
+
+describe('OpenCodeAgentAdapter - signal handling edge cases', () => {
+  let OpenCodeAgentAdapter: new (client: SDKClient) => IOpenCodeAgent;
+
+  beforeEach(async () => {
+    const module = await import('../../../src/opencode/OpenCodeAgentAdapter.js');
+    OpenCodeAgentAdapter = module.OpenCodeAgentAdapter;
+  });
+
+  it('должен возвращать promise rejected если signal уже aborted при вызове invoke', async () => {
+    const mockClient = createMockSDKClient();
+    const adapter = new OpenCodeAgentAdapter(mockClient);
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await adapter.invoke('test', 'agent', { timeoutMs: 5000, signal: controller.signal });
+
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toBe('Operation was aborted');
+  });
+
+  it('должен возвращать error если signal aborted до вызова prompt (createSignalPromise edge)', async () => {
+    const mockClient = createMockSDKClient();
+    const adapter = new OpenCodeAgentAdapter(mockClient);
+
+    const controller = new AbortController();
+    // Abort сразу — это покрывает line 227-229 (signal.aborted === true branch)
+    // Т.к. мы не делаем invoke — это внутренний вызов
+    // Протестируем через signal: controller.signal в invoke
+    controller.abort();
+
+    const result = await adapter.invoke('prompt', 'test', { timeoutMs: 5000, signal: controller.signal });
+
+    expect(result.status).toBe('error');
+  });
+
+  // ========================================================================
+  // Дополнительные тесты для достижения 90%+ functions coverage
+  // ========================================================================
+
+  it('invoke должен возвращать error когда session.abort выбрасывает ошибку (ветка catch)', async () => {
+    // Мокаем client чтобы abort выбрасывал ошибку
+    const mockClient = createMockSDKClient();
+    // Переопределяем session.abort чтобы выбрасывал ошибку
+    mockClient.session.abort = async () => {
+      throw new Error('Abort failed');
+    };
+
+    const adapter = new OpenCodeAgentAdapter(mockClient);
+
+    // Вызываем invoke и получаем sessionId
+    const result = await adapter.invoke('prompt', 'test-agent', { timeoutMs: 5000 });
+    const sessionId = result.sessionId;
+
+    // Вызываем abort для этой сессии - должен вернуть false из-за catch
+    const abortResult = await adapter.abort(sessionId);
+
+    expect(abortResult).toBe(false);
+  });
 });

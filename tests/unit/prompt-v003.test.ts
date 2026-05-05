@@ -377,4 +377,157 @@ describe('buildPromptV003', () => {
       expect(result).toBe('Process this payload');
     });
   });
+
+  // =============================================================================
+  // EDGE CASE TESTS — дополнительные тесты для покрытия edge cases
+  // =============================================================================
+
+  describe('Edge cases: empty and whitespace templates', () => {
+    // Тест: Empty string template — пустая строка не содержит placeholder,
+    // поэтому возвращается "как есть" (пустая строка)
+    it('должен вернуть пустую строку для пустого шаблона', () => {
+      const payload = { message: 'test' };
+      const rule: RuleV003 = {
+        ...defaultRuleV003,
+        name: 'empty-template',
+        jsonPath: '$',
+        promptTemplate: '',
+      } as RuleV003;
+
+      const result = buildPromptV003(rule, payload);
+
+      // Пустая строка не содержит placeholder, возвращается "как есть"
+      expect(result).toBe('');
+    });
+
+    // Тест: Whitespace-only template
+    it('должен обрабатывать шаблон с пробелами', () => {
+      const payload = { message: 'test' };
+      const rule: RuleV003 = {
+        ...defaultRuleV003,
+        name: 'whitespace-template',
+        jsonPath: '$',
+        promptTemplate: '   ',
+      } as RuleV003;
+
+      const result = buildPromptV003(rule, payload);
+
+      // Пробелы не являются placeholder, поэтому шаблон возвращается как есть
+      expect(result).toBe('   ');
+    });
+  });
+
+  describe('Edge cases: duplicate placeholders', () => {
+    // Тест: Same placeholder used twice
+    it('должен заменять один и тот же placeholder дважды', () => {
+      const payload = { x: 'value' };
+      const rule: RuleV003 = {
+        ...defaultRuleV003,
+        name: 'duplicate-placeholder',
+        jsonPath: '$',
+        promptTemplate: 'Value: ${$.x} and again: ${$.x}',
+      } as RuleV003;
+
+      const result = buildPromptV003(rule, payload);
+
+      expect(result).toBe('Value: value and again: value');
+    });
+  });
+
+  describe('Edge cases: array index extraction', () => {
+    // Тест: Array index access in placeholder
+    it('должен извлекать элемент массива по индексу', () => {
+      const payload = {
+        items: ['first', 'second', 'third'],
+      };
+      const rule: RuleV003 = {
+        ...defaultRuleV003,
+        name: 'array-index-extraction',
+        jsonPath: '$',
+        promptTemplate: 'First: ${$.items[0]}',
+      } as RuleV003;
+
+      const result = buildPromptV003(rule, payload);
+
+      expect(result).toBe('First: first');
+    });
+  });
+
+  describe('Edge cases: large extracted values', () => {
+    // Тест: Very large string value
+    it('должен полностью подставлять длинную строку', () => {
+      const longString = 'A'.repeat(10000);
+      const payload = { data: longString };
+      const rule: RuleV003 = {
+        ...defaultRuleV003,
+        name: 'large-value',
+        jsonPath: '$',
+        promptTemplate: 'Data: ${$.data}',
+      } as RuleV003;
+
+      const result = buildPromptV003(rule, payload);
+
+      expect(result).toBe('Data: ' + longString);
+    });
+  });
+
+  describe('Edge cases: nested array access', () => {
+    // Тест: Nested array with object access
+    it('должен извлекать вложенные массивы с доступом к объектам', () => {
+      const payload = {
+        data: {
+          items: [
+            { name: 'Item1', value: 100 },
+            { name: 'Item2', value: 200 },
+          ],
+        },
+      };
+      const rule: RuleV003 = {
+        ...defaultRuleV003,
+        name: 'nested-array-access',
+        jsonPath: '$',
+        promptTemplate: 'Second item: ${$.data.items[1].name}',
+      } as RuleV003;
+
+      const result = buildPromptV003(rule, payload);
+
+      expect(result).toBe('Second item: Item2');
+    });
+  });
+
+  describe('Edge cases: multiple placeholders with first missing', () => {
+    // Тест: Multiple placeholders where first exists and second is missing
+    // ВАЖНО: функция возвращает fallback при ПЕРВОМ отсутствующем placeholder
+    it('должен вернуть fallback когда placeholder не найден', () => {
+      const payload = { exists: 'present' };
+      const rule: RuleV003 = {
+        ...defaultRuleV003,
+        name: 'first-missing-fallback',
+        jsonPath: '$',
+        promptTemplate: '${$.exists} and ${$.missing}',
+      } as RuleV003;
+
+      const result = buildPromptV003(rule, payload);
+
+      // При отсутствии placeholder функция сразу возвращает fallback
+      expect(result).toBe('Process this payload');
+    });
+  });
+
+  describe('Edge cases: null values in payload', () => {
+    // Тест: Explicit null value in payload field
+    it('должен возвращать fallback когда поле содержит null', () => {
+      const payload = { field: null };
+      const rule: RuleV003 = {
+        ...defaultRuleV003,
+        name: 'null-field',
+        jsonPath: '$',
+        promptTemplate: 'Value: ${$.field}',
+      } as RuleV003;
+
+      const result = buildPromptV003(rule, payload);
+
+      expect(result).toBe('Process this payload');
+    });
+  });
 });

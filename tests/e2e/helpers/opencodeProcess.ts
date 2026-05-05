@@ -19,6 +19,18 @@ interface OpenCodeProcessHandle {
 }
 
 /**
+ * Опции для spawnOpenCodeServe.
+ */
+interface SpawnOpenCodeServeOpts {
+  /** Порт для сервера (по умолчанию: автоматически выбрать свободный порт) */
+  port?: number;
+  /** Таймаут ожидания готовности сервера в мс (по умолчанию: 30000) */
+  startupTimeoutMs?: number;
+  /** Интервал опроса готовности в мс (по умолчанию: 500) */
+  checkIntervalMs?: number;
+}
+
+/**
  * Поиск свободного порта на localhost.
  * Создаёт временный сервер на случайном порту и возвращает этот порт после закрытия сервера.
  */
@@ -41,8 +53,13 @@ function getFreePort(): Promise<number> {
  * Ожидание готовности сервера путём опроса эндпоинта /health.
  * @param port - порт для проверки
  * @param timeoutMs - таймаут в миллисекундах
+ * @param checkIntervalMs - интервал опроса в миллисекундах
  */
-async function waitForServerReady(port: number, timeoutMs: number = 30000): Promise<void> {
+async function waitForServerReady(
+  port: number,
+  timeoutMs: number = 30000,
+  checkIntervalMs: number = 500
+): Promise<void> {
   const startTime = Date.now();
   const baseURL = `http://127.0.0.1:${port}`;
 
@@ -65,16 +82,21 @@ async function waitForServerReady(port: number, timeoutMs: number = 30000): Prom
       // Игнорируем ошибки сети и продолжаем опрос
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, checkIntervalMs));
   }
 }
 
 /**
  * Запуск процесса OpenCode в режиме serve.
+ * @param opts - опциональные параметры запуска
  * @returns handle для управления процессом
  */
-async function spawnOpenCodeServe(): Promise<OpenCodeProcessHandle> {
-  const port = await getFreePort();
+async function spawnOpenCodeServe(
+  opts?: SpawnOpenCodeServeOpts
+): Promise<OpenCodeProcessHandle> {
+  const port = opts?.port ?? await getFreePort();
+  const startupTimeoutMs = opts?.startupTimeoutMs ?? 30_000;
+  const checkIntervalMs = opts?.checkIntervalMs ?? 500;
   const baseURL = `http://127.0.0.1:${port}`;
 
   // Создаём дочерний процесс
@@ -110,7 +132,7 @@ async function spawnOpenCodeServe(): Promise<OpenCodeProcessHandle> {
 
   // Ожидаем готовности сервера
   try {
-    await waitForServerReady(port, 30000);
+    await waitForServerReady(port, startupTimeoutMs, checkIntervalMs);
   } catch (error) {
     // При ошибке убиваем процесс и прокидываем ошибку
     childProcess.kill('SIGTERM');
@@ -160,4 +182,4 @@ async function spawnOpenCodeServe(): Promise<OpenCodeProcessHandle> {
 }
 
 export { spawnOpenCodeServe };
-export type { OpenCodeProcessHandle };
+export type { OpenCodeProcessHandle, SpawnOpenCodeServeOpts };

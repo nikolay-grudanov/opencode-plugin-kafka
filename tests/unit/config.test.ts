@@ -146,6 +146,15 @@ describe('parseConfig', () => {
 
       expect(() => parseConfig()).toThrow('Failed to read config file');
     });
+
+    it('should throw Error when file read fails with primitive (non-Error)', () => {
+      // Тестируем ветку error instanceof Error = false → String(error)
+      vi.mocked(readFileSync).mockImplementation(() => {
+        throw 'String error'; // primitive, not Error instance
+      });
+
+      expect(() => parseConfig()).toThrow('Failed to read config file');
+    });
   });
 
   describe('Missing optional prompt_field defaults to "$"', () => {
@@ -502,6 +511,15 @@ describe('parseConfig', () => {
         const fileError = new Error('ENOENT: no such file');
         vi.mocked(readFileSync).mockImplementation(() => {
           throw fileError;
+        });
+
+        expect(() => parseConfigV003()).toThrow('Failed to read config file');
+      });
+
+      it('should throw Error when V003 file read fails with primitive (non-Error)', () => {
+        // Тестируем ветку error instanceof Error = false → String(error) в parseConfigV003
+        vi.mocked(readFileSync).mockImplementation(() => {
+          throw 'String error';
         });
 
         expect(() => parseConfigV003()).toThrow('Failed to read config file');

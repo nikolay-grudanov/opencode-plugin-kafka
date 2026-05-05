@@ -3,6 +3,7 @@
  *
  * CRITICAL: startConsumer вызывает process.exit() в signal handlers и при ошибках.
  * Этот helper перехватывает process.exit чтобы предотвратить завершение тестового процесса.
+ * Перехват process.exit для предотвращения завершения тестового процесса при shutdown.
  */
 
 import type { PluginConfigV003 } from '../../../src/schemas/index.js';
@@ -59,6 +60,32 @@ interface KafkaConnectionSettings {
 }
 
 /**
+ * Перехватывает process.exit чтобы предотвратить завершение тестового процесса.
+ * @returns Функция для восстановления оригинального process.exit
+ */
+function interceptExit(): () => void {
+  const originalExit = process.exit;
+
+  // Перехватываем process.exit — логируем но НЕ завершаем процесс
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (process.exit as any) = ((code?: number) => {
+    console.log(
+      JSON.stringify({
+        msg: 'process.exit intercepted in pluginRunner',
+        code,
+      }),
+    );
+    // Не вызываем originalExit — просто возвращаемся в вызывающий код
+    // Это позволяет graceful shutdown завершиться без убийства тестов
+  });
+
+  // Возвращаем функцию для восстановления
+  return () => {
+    process.exit = originalExit;
+  };
+}
+
+/**
  * Запускает Kafka плагин (consumer) в текущем процессе.
  *
  * @param config - Конфигурация плагина (topics + rules)
@@ -87,20 +114,10 @@ async function runPlugin(
   agent: IOpenCodeAgent,
   connection: KafkaConnectionSettings,
 ): Promise<PluginRunnerHandle> {
-  // Сохраняем оригинальную функцию process.exit
-  const originalExit = process.exit as (code?: number) => never;
+  // Перехватываем process.exit для предотвращения завершения тестов
+  const restoreExit = interceptExit();
 
-  // Перехватываем process.exit чтобы предотвратить завершение тестового процесса
-  process.exit = ((code?: number) => {
-    console.log(
-      JSON.stringify({
-        msg: 'process.exit intercepted in pluginRunner',
-        code,
-      }),
-    );
-  }) as never;
-
-  // Устанавливаем переменные окружения для Kafka
+  // Сохраняем env vars для восстановления после тестов
   const savedEnv = {
     KAFKA_BROKERS: process.env.KAFKA_BROKERS,
     KAFKA_CLIENT_ID: process.env.KAFKA_CLIENT_ID,
@@ -113,6 +130,7 @@ async function runPlugin(
     KAFKA_IGNORE_TOMBSTONES: process.env.KAFKA_IGNORE_TOMBSTONES,
   };
 
+  // Устанавливаем переменные окружения для Kafka
   process.env.KAFKA_BROKERS = connection.brokers;
   process.env.KAFKA_CLIENT_ID = connection.clientId;
   process.env.KAFKA_GROUP_ID = connection.groupId;
@@ -159,7 +177,6 @@ async function runPlugin(
     stop: async () => {
       try {
         // Отправляем SIGTERM себе — это триггерит shutdownHandler в consumer
-        // signal handler вызовет mocked process.exit (пока он ещё перехвачен)
         process.kill(process.pid, 'SIGTERM');
 
         // Ждём завершения shutdown или таймаута
@@ -169,7 +186,7 @@ async function runPlugin(
         await Promise.race([consumerPromise, timeoutPromise]);
 
         // Восстанавливаем оригинальный process.exit ПОСЛЕ shutdown
-        process.exit = originalExit;
+        restoreExit();
 
         // Восстанавливаем сохранённые env vars
         if (savedEnv.KAFKA_BROKERS !== undefined) {
@@ -226,6 +243,9 @@ async function runPlugin(
           delete process.env.KAFKA_IGNORE_TOMBSTONES;
         }
       } catch (error) {
+        // Восстанавливаем process.exit при ошибке
+        restoreExit();
+
         // Подавляем все ошибки при остановке
         console.warn(
           JSON.stringify({

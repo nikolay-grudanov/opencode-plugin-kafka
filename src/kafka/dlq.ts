@@ -20,17 +20,19 @@ import type { Producer } from 'kafkajs';
  * @returns Санитизированное сообщение
  */
 function sanitizeErrorMessage(message: string): string {
-  return message
-    // Маскируем пароли в формате password=xxx, password: xxx, "password":"xxx"
-    .replace(/password\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'password=***')
-    // Маскируем токены
-    .replace(/token\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'token=***')
-    // Маскируем API ключи
-    .replace(/api[_-]?key\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'api_key=***')
-    // Маскируем secret
-    .replace(/secret\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'secret=***')
-    // Ограничиваем длину
-    .slice(0, 1000);
+  return (
+    message
+      // Маскируем пароли в формате password=xxx, password: xxx, "password":"xxx"
+      .replace(/password\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'password=***')
+      // Маскируем токены
+      .replace(/token\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'token=***')
+      // Маскируем API ключи
+      .replace(/api[_-]?key\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'api_key=***')
+      // Маскируем secret
+      .replace(/secret\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'secret=***')
+      // Ограничиваем длину
+      .slice(0, 1000)
+  );
 }
 
 /**
@@ -87,8 +89,14 @@ export interface DlqEnvelope {
  */
 export async function sendToDlq(
   producer: Producer,
-  originalMessage: { value: string | null; topic: string; partition: number; offset: string | number; originalKey?: string | null },
-  error: Error,
+  originalMessage: {
+    value: string | null;
+    topic: string;
+    partition: number;
+    offset: string | number;
+    originalKey?: string | null;
+  },
+  error: Error
 ): Promise<void> {
   try {
     // Определяем целевой DLQ топик
@@ -132,7 +140,7 @@ export async function sendToDlq(
         offset: originalMessage.offset,
         errorMessage: error.message,
         failedAt: envelope.failedAt,
-      }),
+      })
     );
   } catch (sendError) {
     // DLQ send failure — non-fatal, логируем и продолжаем
@@ -146,7 +154,7 @@ export async function sendToDlq(
         errorMessage: error.message,
         sendError: sendError instanceof Error ? sendError.message : String(sendError),
         failedAt: new Date().toISOString(),
-      }),
+      })
     );
   }
 }

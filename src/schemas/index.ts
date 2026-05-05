@@ -71,7 +71,10 @@ export const kafkaEnvSchema = z
     KAFKA_GROUP_ID: z.string().min(1, 'KAFKA_GROUP_ID is required'),
 
     // Optional SSL configuration (must be lowercase "true" or "false")
-    KAFKA_SSL: z.enum(['true', 'false']).optional().transform((v) => v === 'true'),
+    KAFKA_SSL: z
+      .enum(['true', 'false'])
+      .optional()
+      .transform((v) => v === 'true'),
 
     // Optional SASL authentication
     KAFKA_USERNAME: z.string().optional(),
@@ -85,7 +88,10 @@ export const kafkaEnvSchema = z
     KAFKA_ROUTER_CONFIG: z.string().optional(),
 
     // Optional tombstone handling (must be lowercase "true" or "false")
-    KAFKA_IGNORE_TOMBSTONES: z.enum(['true', 'false']).optional().transform((v) => v === 'true'),
+    KAFKA_IGNORE_TOMBSTONES: z
+      .enum(['true', 'false'])
+      .optional()
+      .transform((v) => v === 'true'),
   })
   .passthrough();
 
@@ -112,7 +118,12 @@ export const RuleV003Schema = z.object({
   // Таймаут выполнения агента в миллисекундах (default: 120000 = 2 минуты)
   timeoutMs: z.number().int().positive('Timeout must be positive').default(120_000),
   // Максимальное количество параллельных вызовов (default: 1, v1 — sequential)
-  concurrency: z.number().int().min(1, 'Concurrency must be at least 1').max(10, 'Concurrency must be at most 10').default(1),
+  concurrency: z
+    .number()
+    .int()
+    .min(1, 'Concurrency must be at least 1')
+    .max(10, 'Concurrency must be at most 10')
+    .default(1),
 });
 
 /**

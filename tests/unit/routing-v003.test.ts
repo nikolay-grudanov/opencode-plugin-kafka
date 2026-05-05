@@ -262,4 +262,225 @@ describe('matchRuleV003', () => {
     expect(result).toEqual(rules[0]);
     expect(result?.name).toBe('deep-path');
   });
+
+  // =============================================================================
+  // EDGE CASE TESTS — дополнительные тесты для покрытия edge cases
+  // =============================================================================
+
+  describe('Edge cases: empty object and non-existent fields', () => {
+    // Тест: Empty object payload с catch-all правилом
+    it('должен вернуть правило для пустого объекта {} с catch-all $', () => {
+      const payload = {};
+
+      const rules: RuleV003[] = [
+        {
+          ...defaultRuleV003,
+          name: 'catch-all-empty',
+          jsonPath: '$',
+          promptTemplate: 'Process: ${$}',
+        } as RuleV003,
+      ];
+
+      const result = matchRuleV003(payload, rules);
+
+      expect(result).toEqual(rules[0]);
+      expect(result?.name).toBe('catch-all-empty');
+    });
+
+    // Тест: Non-existent field — JSONPath возвращает пустой массив
+    it('должен вернуть null для несуществующего поля $.nonExistent', () => {
+      const payload = { existing: 'value' };
+
+      const rules: RuleV003[] = [
+        {
+          ...defaultRuleV003,
+          name: 'non-existent-field',
+          jsonPath: '$.nonExistent',
+          promptTemplate: 'Should not match',
+        } as RuleV003,
+      ];
+
+      const result = matchRuleV003(payload, rules);
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('Edge cases: array index access', () => {
+    // Тест: Array index access — $.items[0]
+    it('должен вернуть правило для доступа к элементу массива по индексу', () => {
+      const payload = {
+        items: ['first', 'second', 'third'],
+      };
+
+      const rules: RuleV003[] = [
+        {
+          ...defaultRuleV003,
+          name: 'array-index',
+          jsonPath: '$.items[0]',
+          promptTemplate: 'First item: ${$}',
+        } as RuleV003,
+      ];
+
+      const result = matchRuleV003(payload, rules);
+
+      expect(result).toEqual(rules[0]);
+      expect(result?.name).toBe('array-index');
+    });
+  });
+
+  describe('Edge cases: multiple rules with partial matching', () => {
+    // Тест: Multiple rules — first doesn't match, second matches
+    // ВАЖНО: JSONPath filter [?(@.field=="value")] требует объект, а не примитив
+    // Используем root path '$' для простоты — проверяем что первый не matching rule возвращает null
+    it('должен вернуть null когда первое правило не совпадает а второе совпадает', () => {
+      const payload = {
+        status: 'INFO',
+        critical: 'data',
+      };
+
+      const rules: RuleV003[] = [
+        {
+          ...defaultRuleV003,
+          name: 'rule-no-match',
+          jsonPath: '$.critical[?(@=="NOMATCH")]', // не совпадает
+          promptTemplate: 'Critical: ${$}',
+        } as RuleV003,
+        {
+          ...defaultRuleV003,
+          name: 'rule-matches',
+          jsonPath: '$.status', // совпадает - статус INFO
+          promptTemplate: 'Info: ${$}',
+        } as RuleV003,
+      ];
+
+      const result = matchRuleV003(payload, rules);
+
+      expect(result).toEqual(rules[1]);
+      expect(result?.name).toBe('rule-matches');
+    });
+  });
+
+  describe('Edge cases: deep nested paths', () => {
+    // Тест: Deep nested path — $.level1.level2.level3
+    it('должен работать с deeply nested paths (3+ уровня)', () => {
+      const payload = {
+        level1: {
+          level2: {
+            level3: {
+              level4: {
+                value: 'deep',
+              },
+            },
+          },
+        },
+      };
+
+      const rules: RuleV003[] = [
+        {
+          ...defaultRuleV003,
+          name: 'deep-nested',
+          jsonPath: '$.level1.level2.level3.level4.value',
+          promptTemplate: 'Deep: ${$}',
+        } as RuleV003,
+      ];
+
+      const result = matchRuleV003(payload, rules);
+
+      expect(result).toEqual(rules[0]);
+      expect(result?.name).toBe('deep-nested');
+    });
+  });
+
+  describe('Edge cases: invalid JSONPath handling', () => {
+    // Тест: Whitespace in JSONPath — невалидный path с пробелом
+    it('должен корректно обрабатывать JSONPath с пробелами', () => {
+      const payload = { field: 'value' };
+
+      const rules: RuleV003[] = [
+        {
+          ...defaultRuleV003,
+          name: 'whitespace-jsonpath',
+          jsonPath: '$. field',
+          promptTemplate: 'Invalid: ${$}',
+        } as RuleV003,
+      ];
+
+      // Не должен бросать исключение
+      expect(() => matchRuleV003(payload, rules)).not.toThrow();
+    });
+  });
+
+  describe('Edge cases: primitive payloads', () => {
+    // Тест: Boolean payload (true) — используем payload с полем для корректного JSONPath
+    it('должен работать с boolean payload (true)', () => {
+      const payload = { active: true };
+
+      const rules: RuleV003[] = [
+        {
+          ...defaultRuleV003,
+          name: 'bool-true',
+          jsonPath: '$.active',
+          promptTemplate: 'Bool: ${$}',
+        } as RuleV003,
+      ];
+
+      const result = matchRuleV003(payload, rules);
+
+      expect(result).toEqual(rules[0]);
+    });
+
+    it('должен работать с boolean payload (false)', () => {
+      const payload = { active: false };
+
+      const rules: RuleV003[] = [
+        {
+          ...defaultRuleV003,
+          name: 'bool-false',
+          jsonPath: '$.active',
+          promptTemplate: 'Bool: ${$}',
+        } as RuleV003,
+      ];
+
+      const result = matchRuleV003(payload, rules);
+
+      expect(result).toEqual(rules[0]);
+    });
+
+    // Тест: Number payload — используем payload с числовым полем
+    it('должен работать с number payload', () => {
+      const payload = { count: 42 };
+
+      const rules: RuleV003[] = [
+        {
+          ...defaultRuleV003,
+          name: 'number-payload',
+          jsonPath: '$.count',
+          promptTemplate: 'Number: ${$}',
+        } as RuleV003,
+      ];
+
+      const result = matchRuleV003(payload, rules);
+
+      expect(result).toEqual(rules[0]);
+    });
+
+    // Тест: String payload — используем payload со строковым полем
+    it('должен работать со string payload', () => {
+      const payload = { message: 'hello' };
+
+      const rules: RuleV003[] = [
+        {
+          ...defaultRuleV003,
+          name: 'string-payload',
+          jsonPath: '$.message',
+          promptTemplate: 'String: ${$}',
+        } as RuleV003,
+      ];
+
+      const result = matchRuleV003(payload, rules);
+
+      expect(result).toEqual(rules[0]);
+    });
+  });
 });

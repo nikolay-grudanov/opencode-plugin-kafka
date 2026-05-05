@@ -40,10 +40,22 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
   async invoke(prompt: string, agentId: string, options: InvokeOptions): Promise<AgentResult> {
     // Валидация входных параметров
     if (!prompt?.trim()) {
-      return { status: 'error', errorMessage: 'Prompt cannot be empty', sessionId: '', executionTimeMs: 0, timestamp: new Date().toISOString() };
+      return {
+        status: 'error',
+        errorMessage: 'Prompt cannot be empty',
+        sessionId: '',
+        executionTimeMs: 0,
+        timestamp: new Date().toISOString(),
+      };
     }
     if (!agentId?.trim()) {
-      return { status: 'error', errorMessage: 'Agent ID cannot be empty', sessionId: '', executionTimeMs: 0, timestamp: new Date().toISOString() };
+      return {
+        status: 'error',
+        errorMessage: 'Agent ID cannot be empty',
+        sessionId: '',
+        executionTimeMs: 0,
+        timestamp: new Date().toISOString(),
+      };
     }
 
     const startTime = Date.now();
@@ -52,10 +64,18 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
     try {
       // 1. Создаём новую сессию
       // hey-api wrapper возвращает { data: { id: ... }, error: null }
-      const session = await this.client.session.create({ body: { title: `kafka-plugin-${agentId}` } });
+      const session = await this.client.session.create({
+        body: { title: `kafka-plugin-${agentId}` },
+      });
       sessionId = session.data?.id ?? '';
       if (!sessionId) {
-        return { status: 'error', errorMessage: 'Empty session ID from SDK', sessionId: '', executionTimeMs: Date.now() - startTime, timestamp: new Date().toISOString() };
+        return {
+          status: 'error',
+          errorMessage: 'Empty session ID from SDK',
+          sessionId: '',
+          executionTimeMs: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
+        };
       }
 
       // 2. Устанавливаем timeout (по умолчанию 120 сек)
@@ -67,8 +87,11 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
       }
 
       // 4. Создаём промисы для race: timeout и abort signal
-      const { promise: timeoutPromise, clear: cleanupTimeout } = this.createTimeoutPromise(timeoutMs);
-      const { promise: signalPromise, clear: cleanupSignal } = this.createSignalPromise(options.signal);
+      const { promise: timeoutPromise, clear: cleanupTimeout } =
+        this.createTimeoutPromise(timeoutMs);
+      const { promise: signalPromise, clear: cleanupSignal } = this.createSignalPromise(
+        options.signal
+      );
       let response;
       try {
         response = await Promise.race([
@@ -194,7 +217,10 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
    *   - `promise` — Promise который reject AgentError при abort
    *   - `clear` — Функция удаления слушателя (вызывать в finally)
    */
-  private createSignalPromise(signal?: AbortSignal): { promise: Promise<never>; clear: () => void } {
+  private createSignalPromise(signal?: AbortSignal): {
+    promise: Promise<never>;
+    clear: () => void;
+  } {
     if (!signal) {
       return { promise: new Promise<never>(() => {}), clear: () => {} };
     }

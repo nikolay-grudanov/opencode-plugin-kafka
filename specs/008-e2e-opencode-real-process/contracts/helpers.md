@@ -11,7 +11,7 @@
 **Parameters:**
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
-| opts.port | `number` | `3001` | HTTP port |
+| opts.port | `number` | `auto` (getFreePort) | HTTP port — если не указан, автоматически выбирается свободный порт |
 | opts.startupTimeoutMs | `number` | `30000` | Max wait for ready |
 | opts.checkIntervalMs | `number` | `500` | Health check interval |
 

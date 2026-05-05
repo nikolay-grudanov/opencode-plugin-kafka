@@ -3,6 +3,7 @@
  * Создаёт топики, производит и потребляет сообщения из реального Redpanda контейнера.
  */
 import { Kafka, type KafkaMessage } from 'kafkajs';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Интерфейс тестового сообщения для отправки в Kafka.
@@ -155,9 +156,9 @@ async function consumeOneMessage(
     brokers,
   });
 
-  const consumer = kafka.consumer({
-    groupId: crypto.randomUUID(),
-  });
+const consumer = kafka.consumer({
+      groupId: randomUUID(),
+    });
 
   await consumer.connect();
   await consumer.subscribe({ topic, fromBeginning });
@@ -170,11 +171,12 @@ async function consumeOneMessage(
     setTimeout(resolve, timeoutMs);
   });
 
+  let messageReceived: KafkaMessage | undefined;
   try {
     // Запускаем consumer
     consumer.run({
       eachMessage: async ({ message }) => {
-        result = message;
+        messageReceived = message;
         resolveRun(); // Сигнализируем что сообщение получено
       },
     });
@@ -182,13 +184,14 @@ async function consumeOneMessage(
     // Ждём либо сообщение, либо таймаут
     await Promise.race([runPromise, timeoutPromise]);
 
-    if (result) {
+if (messageReceived) {
+      const msg = messageReceived as unknown as { offset: string; partition: number; key: Buffer | null };
       console.log(JSON.stringify({
         msg: 'Message received',
         topic,
-        offset: result.offset,
-        partition: result.partition,
-        hasKey: !!result.key,
+        offset: msg.offset,
+        partition: msg.partition,
+        hasKey: !!msg.key,
         brokers,
       }));
     } else {
@@ -212,7 +215,7 @@ async function consumeOneMessage(
     }
   }
 
-  return result;
+  return messageReceived ?? null;
 }
 
 /**
@@ -235,12 +238,12 @@ async function consumeMessages(
     brokers,
   });
 
-  const consumer = kafka.consumer({
-    groupId: crypto.randomUUID(),
-  });
+const consumer = kafka.consumer({
+      groupId: randomUUID(),
+    });
 
   await consumer.connect();
-  await consumer.subscribe({ topic, fromBeginning: true });
+  await consumer.subscribe({ topic, fromBeginning: false });
 
   const messages: KafkaMessage[] = [];
   let resolveRun: () => void;

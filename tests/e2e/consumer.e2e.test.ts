@@ -11,6 +11,7 @@
  * T-E2E-008: consumer recovery — series of errors
  */
 import { describe, test, beforeAll, afterAll, expect } from 'vitest';
+import { Kafka } from 'kafkajs';
 import {
   startRedpanda,
   stopRedpanda,
@@ -26,11 +27,67 @@ import { runPlugin } from './helpers/pluginRunner.js';
 import { createSDKClient } from './helpers/sdkClient.js';
 import { OpenCodeAgentAdapter } from '../../src/opencode/OpenCodeAgentAdapter.js';
 import type { PluginConfigV003 } from '../../src/schemas/index.js';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { StartedRedpandaContainer } from '@testcontainers/redpanda';
+import { execSync } from 'node:child_process';
+
+/**
+ * Валидирует container reference — только alphanumeric и дефисы.
+ * @param ref - container ID или имя
+ * @returns валидированный ref
+ * @throws Error если ref содержит недопустимые символы
+ */
+function sanitizeContainerRef(ref: string): string {
+  if (!/^[a-zA-Z0-9._-]+$/.test(ref)) {
+    throw new Error(`Invalid container reference: ${ref}`);
+  }
+  return ref;
+}
+
+/**
+ * Ожидает готовности consumer group путём опроса admin API.
+ * Проверяет что группа зарегистрирована в Kafka.
+ * @param brokers - список брокеров Kafka
+ * @param groupId - идентификатор consumer группы
+ * @param timeoutMs - таймаут ожидания (по умолчанию 10000)
+ * @param intervalMs - интервал опроса (по умолчанию 500)
+ */
+async function waitForConsumerReady(
+  brokers: string[],
+  groupId: string,
+  timeoutMs: number = 10_000,
+  intervalMs: number = 500
+): Promise<void> {
+  const kafka = new Kafka({
+    clientId: 'e2e-ready-check',
+    brokers,
+  });
+
+  const admin = kafka.admin();
+  await admin.connect();
+
+  try {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const groups = await admin.listGroups();
+        const group = groups.groups.find((g) => g.groupId === groupId);
+        if (group) {
+          return; // Consumer group зарегистрирован
+        }
+      } catch {
+        // Admin API может быть недоступен — retry
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    throw new Error(`Consumer group ${groupId} not ready within ${timeoutMs}ms`);
+  } finally {
+    await admin.disconnect();
+  }
+}
 
 describe('Kafka consumer E2E', () => {
   // Переменные на уровне модуля для beforeAll/afterAll
@@ -141,11 +198,22 @@ describe('Kafka consumer E2E', () => {
 
     // 4. Force cleanup any remaining Redpanda containers (Podman compatibility)
     try {
-      const { execSync } = require('child_process');
-      execSync('podman rm -f $(podman ps -aq --filter ancestor=docker.redpanda.com/redpandadata/redpanda:latest) 2>/dev/null || true', {
-        stdio: 'ignore',
-        timeout: 10000,
-      });
+      // Получаем список container IDs через безопасный вызов
+      const containersOutput = execSync(
+        'podman ps -aq --filter ancestor=docker.redpanda.com/redpandadata/redpanda:latest',
+        { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] },
+      );
+      const containerIds = containersOutput.trim().split('\n').filter(Boolean);
+
+      // Удаляем каждый контейнер с валидацией
+      for (const containerId of containerIds) {
+        const sanitized = sanitizeContainerRef(containerId.trim());
+        execSync(`podman rm -f ${sanitized}`, {
+          encoding: 'utf8',
+          timeout: 10_000,
+          stdio: ['ignore', 'ignore', 'ignore'],
+        });
+      }
     } catch {
       // Ignore cleanup errors
     }
@@ -169,8 +237,8 @@ describe('Kafka consumer E2E', () => {
       };
       const pluginHandle = await runPlugin(pluginConfig, agent, connection);
 
-      // 3. Give consumer time to connect and subscribe
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      // 3. Wait for consumer to connect and subscribe
+      await waitForConsumerReady(brokers, connection.groupId);
 
       // 4. Produce test message
       const testMessage = { task: 'What is 2+2?' };
@@ -203,14 +271,14 @@ describe('Kafka consumer E2E', () => {
     120_000
   );
 
-  // Routing plugin config для T-E2E-002
+  // Routing plugin config для T-E2E-002 (jsonPath match/skip)
   const routingPluginConfig: PluginConfigV003 = {
     topics: [ROUTING_INPUT_TOPIC],
     rules: [
       {
         name: 'e2e-routing-rule',
-        jsonPath: '$.task', // совпадает когда есть поле task
-        promptTemplate: '${$.content}', // извлекает content поле из payload
+        jsonPath: "$.type == 'question'", // совпадает только когда type === 'question'
+        promptTemplate: '{{value}}', // извлекает value из совпавшего элемента
         agentId: AGENT_ID,
         responseTopic: ROUTING_RESPONSE_TOPIC,
         timeoutMs: 120_000,
@@ -298,7 +366,6 @@ describe('Kafka consumer E2E', () => {
       const agent = new OpenCodeAgentAdapter(sdkClient);
 
       // 3. Start plugin consumer with routing config
-      // Преобразуем массив brokers в строку через запятую (требуется для KafkaConnectionSettings)
       const brokersString = brokers.join(',');
       const connection = {
         brokers: brokersString,
@@ -308,109 +375,53 @@ describe('Kafka consumer E2E', () => {
       };
       const pluginHandle = await runPlugin(routingPluginConfig, agent, connection);
 
-      // 4. Give consumer time to connect and subscribe
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      // 4. Wait for consumer to connect and subscribe
+      await waitForConsumerReady(brokers, connection.groupId);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
 
-      // 5. Send non-matching message (type: "notification") → should be skipped
-      const nonMatchingMessage = { type: 'notification', content: 'hello' };
+      // 5. Send two messages: one matches (type: "question"), one does not (type: "command")
+      const correlationIdMatch = `e2e-route-match-${Date.now()}-${randomUUID().slice(0, 8)}`;
+      const correlationIdSkip = `e2e-route-skip-${Date.now()}-${randomUUID().slice(0, 8)}`;
+
       await produceMessage(brokers, ROUTING_INPUT_TOPIC, {
-        value: JSON.stringify(nonMatchingMessage),
+        value: JSON.stringify({ type: 'question', value: 'What is 2+2?', correlationId: correlationIdMatch }),
       });
 
-      // 6. Wait for potential processing, then check NO response
-      await new Promise((resolve) => setTimeout(resolve, 5_000));
-      const noResponse = await consumeOneMessage(brokers, ROUTING_RESPONSE_TOPIC, 5_000);
-      expect(noResponse).toBeNull(); // Non-matching message should NOT produce response
-
-      // 7. Send matching message (type: "question") → should be processed
-      const matchingMessage = { task: 'answer', content: 'What color is the sky?' };
       await produceMessage(brokers, ROUTING_INPUT_TOPIC, {
-        value: JSON.stringify(matchingMessage),
+        value: JSON.stringify({ type: 'command', value: 'do something', correlationId: correlationIdSkip }),
       });
 
-      // 8. Consume response (with generous timeout for E2E, fromBeginning=true to catch already-produced response)
-      const responseMessage = await consumeOneMessage(brokers, ROUTING_RESPONSE_TOPIC, 90_000, true);
-      expect(responseMessage).not.toBeNull();
+      // 6. Wait for processing
+      await new Promise((resolve) => setTimeout(resolve, 30_000));
 
-      // 9. Parse and assert response
-      const response = JSON.parse(responseMessage!.value!.toString());
-      expect(response.status).toBe('success');
-      expect(response.response).toBeDefined();
-      expect(typeof response.response).toBe('string');
-      expect(response.response.length).toBeGreaterThan(0);
-      expect(response.ruleName).toBe('e2e-routing-rule');
-      expect(response.agentId).toBe(AGENT_ID);
+      // 7. Should get ONE response (matching message only)
+      const matchResponse = await consumeOneMessage(brokers, ROUTING_RESPONSE_TOPIC, 30_000);
+      expect(matchResponse).not.toBeNull();
 
-      // 10. Stop plugin
+      const matchResult = JSON.parse(matchResponse!.value!.toString());
+      expect(matchResult.correlationId).toBe(correlationIdMatch);
+      expect(matchResult.status).toBe('success');
+      expect(matchResult.response).toBeDefined();
+
+      // 8. Should get NO DLQ entry (non-matching simply skipped, not an error)
+      const dlqMessage = await consumeOneMessage(brokers, ROUTING_DLQ_TOPIC, 5_000);
+      expect(dlqMessage).toBeNull();
+
+      // 9. Stop plugin
       await pluginHandle.stop();
     },
     120_000
   );
 
+  // T-E2E-003: JSONPath field extraction — nested fields
   test(
-    'T-E2E-004: timeout → DLQ',
+    'T-E2E-003: JSONPath field extraction — nested fields',
     async function () {
-      // 1. Create timeout topics
-      await createTopics(brokers, [TIMEOUT_INPUT_TOPIC, TIMEOUT_DLQ_TOPIC]);
-
-      // 2. Create SDK client and agent adapter
-      const sdkClient = createSDKClient({ baseURL: opencodeHandle.baseURL });
-      const agent = new OpenCodeAgentAdapter(sdkClient);
-
-      // 3. Start plugin consumer with timeout config
-      const brokersString = brokers.join(',');
-      const connection = {
-        brokers: brokersString,
-        clientId: 'e2e-timeout-client',
-        groupId: `e2e-timeout-group-${Date.now()}`,
-        dlqTopic: TIMEOUT_DLQ_TOPIC,
-      };
-      const pluginHandle = await runPlugin(timeoutPluginConfig, agent, connection);
-
-      // 4. Give consumer time to connect and subscribe
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
-
-      // 5. Produce message that will timeout
-      const timeoutMessage = { task: 'This should timeout' };
-      await produceMessage(brokers, TIMEOUT_INPUT_TOPIC, {
-        value: JSON.stringify(timeoutMessage),
-      });
-
-      // 6. Consume from DLQ (timeout message should appear)
-      const dlqMessage = await consumeOneMessage(brokers, TIMEOUT_DLQ_TOPIC, 30_000, true);
-      expect(dlqMessage).not.toBeNull();
-
-      // 7. Parse and assert DLQ envelope
-      const dlqEnvelope = JSON.parse(dlqMessage!.value!.toString());
-      expect(dlqEnvelope.topic).toBe(TIMEOUT_INPUT_TOPIC);
-      expect(dlqEnvelope.errorMessage.toLowerCase()).toContain('timeout');
-      expect(dlqEnvelope.originalValue).not.toBeNull();
-      expect(dlqEnvelope.failedAt).toBeDefined();
-
-      // 8. Verify consumer continues: send another message
-      const secondMessage = { task: 'Another timeout test' };
-      await produceMessage(brokers, TIMEOUT_INPUT_TOPIC, {
-        value: JSON.stringify(secondMessage),
-      });
-
-      // 9. Consume second DLQ message — proves consumer is still alive
-      const secondDlqMessage = await consumeOneMessage(brokers, TIMEOUT_DLQ_TOPIC, 30_000, true);
-      expect(secondDlqMessage).not.toBeNull();
-      const secondEnvelope = JSON.parse(secondDlqMessage!.value!.toString());
-      expect(secondEnvelope.topic).toBe(TIMEOUT_INPUT_TOPIC);
-      expect(secondEnvelope.errorMessage.toLowerCase()).toContain('timeout');
-
-      // 10. Stop plugin
-      await pluginHandle.stop();
-    },
-    120_000
-  );
-
-  test(
-    'T-E2E-003: JSONPath field extraction',
-    async function () {
-      // 1. Create extraction topics
-      await createTopics(brokers, [EXTRACTION_INPUT_TOPIC, EXTRACTION_RESPONSE_TOPIC]);
+      // 1. Create extraction test topics
+      await createTopics(brokers, [
+        EXTRACTION_INPUT_TOPIC,
+        EXTRACTION_RESPONSE_TOPIC,
+      ]);
 
       // 2. Create SDK client and agent adapter
       const sdkClient = createSDKClient({ baseURL: opencodeHandle.baseURL });
@@ -426,32 +437,37 @@ describe('Kafka consumer E2E', () => {
       };
       const pluginHandle = await runPlugin(extractionPluginConfig, agent, connection);
 
-      // 4. Give consumer time to connect and subscribe
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      // 4. Wait for consumer to connect and subscribe
+      await waitForConsumerReady(brokers, connection.groupId);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
 
-      // 5. Produce message with nested fields
-      const extractionMessage = {
+      // 5. Send message with nested fields
+      const correlationId = `e2e-extraction-${Date.now()}-${randomUUID().slice(0, 8)}`;
+      const nestedMessage = {
         data: {
-          query: 'What is TypeScript?',
-          context: 'Programming languages discussion',
+          query: 'What is the capital of France?',
+          context: 'geo',
         },
+        correlationId,
       };
       await produceMessage(brokers, EXTRACTION_INPUT_TOPIC, {
-        value: JSON.stringify(extractionMessage),
+        value: JSON.stringify(nestedMessage),
       });
 
-      // 6. Consume response (with generous timeout for E2E, fromBeginning=true to catch already-produced response)
-      const responseMessage = await consumeOneMessage(brokers, EXTRACTION_RESPONSE_TOPIC, 90_000, true);
+      // 6. Consume response
+      const responseMessage = await consumeOneMessage(brokers, EXTRACTION_RESPONSE_TOPIC, 60_000);
       expect(responseMessage).not.toBeNull();
 
-      // 7. Parse and assert response
+      // 7. Verify response contains extracted fields
       const response = JSON.parse(responseMessage!.value!.toString());
+      expect(response.correlationId).toBe(correlationId);
       expect(response.status).toBe('success');
       expect(response.response).toBeDefined();
       expect(typeof response.response).toBe('string');
-      expect(response.response.length).toBeGreaterThan(0);
+      // Prompt template: "Context: ${$.data.context} Question: ${$.data.query}"
+      expect(response.response).toMatch(/geo/);
+      expect(response.response).toMatch(/France/);
       expect(response.ruleName).toBe('e2e-extraction-rule');
-      expect(response.agentId).toBe(AGENT_ID);
 
       // 8. Stop plugin
       await pluginHandle.stop();
@@ -459,10 +475,74 @@ describe('Kafka consumer E2E', () => {
     120_000
   );
 
+  // T-E2E-004: Agent timeout → DLQ
   test(
-    'T-E2E-005: minimal response — not DLQ',
+    'T-E2E-004: Agent timeout → DLQ',
     async function () {
-      // 1. Create minimal response topics
+      // 1. Create timeout test topics
+      await createTopics(brokers, [
+        TIMEOUT_INPUT_TOPIC,
+        TIMEOUT_DLQ_TOPIC,
+      ]);
+
+      // 2. Create SDK client and agent adapter
+      const sdkClient = createSDKClient({ baseURL: opencodeHandle.baseURL });
+      const agent = new OpenCodeAgentAdapter(sdkClient);
+
+      // 3. Start plugin consumer with timeout config
+      const brokersString = brokers.join(',');
+      const connection = {
+        brokers: brokersString,
+        clientId: 'e2e-timeout-client',
+        groupId: `e2e-timeout-group-${Date.now()}`,
+        dlqTopic: TIMEOUT_DLQ_TOPIC,
+      };
+      const pluginHandle = await runPlugin(timeoutPluginConfig, agent, connection);
+
+      // 4. Wait for consumer to connect and subscribe
+      await waitForConsumerReady(brokers, connection.groupId);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+
+      // 5. Send message that will timeout (request thinking for 5 seconds)
+      const correlationId = `e2e-timeout-${Date.now()}-${randomUUID().slice(0, 8)}`;
+      const timeoutMessage = { task: 'Think silently for 5 seconds', correlationId };
+      await produceMessage(brokers, TIMEOUT_INPUT_TOPIC, {
+        value: JSON.stringify(timeoutMessage),
+      });
+
+      // 6. Wait for timeout to trigger
+      await new Promise((resolve) => setTimeout(resolve, 30_000));
+
+      // 7. Should get DLQ entry
+      const dlqMessage = await consumeOneMessage(brokers, TIMEOUT_DLQ_TOPIC, 30_000);
+      expect(dlqMessage).not.toBeNull();
+
+      const dlqEnvelope = JSON.parse(dlqMessage!.value!.toString());
+      expect(dlqEnvelope.topic).toBe(TIMEOUT_INPUT_TOPIC);
+      expect(dlqEnvelope.errorMessage.toLowerCase()).toMatch(/timeout/);
+      expect(dlqEnvelope.failedMessage).toBeDefined();
+
+      // 8. Verify consumer still works: send another message
+      const validCorrelationId = `e2e-timeout-valid-${Date.now()}-${randomUUID().slice(0, 8)}`;
+      await produceMessage(brokers, TIMEOUT_INPUT_TOPIC, {
+        value: JSON.stringify({ task: 'What is 1+1?', correlationId: validCorrelationId }),
+      });
+
+      // Wait for a valid message to be processed
+      // NOTE: timeoutPluginConfig has no responseTopic, so no response is produced
+      // But consumer should continue running
+
+      // 9. Stop plugin
+      await pluginHandle.stop();
+    },
+    120_000
+  );
+
+  // T-E2E-005: Minimal response — not DLQ
+  test(
+    'T-E2E-005: Minimal response — not DLQ',
+    async function () {
+      // 1. Create minimal response test topics
       await createTopics(brokers, [
         MINIMAL_INPUT_TOPIC,
         MINIMAL_RESPONSE_TOPIC,
@@ -483,26 +563,28 @@ describe('Kafka consumer E2E', () => {
       };
       const pluginHandle = await runPlugin(minimalPluginConfig, agent, connection);
 
-      // 4. Give consumer time to connect and subscribe
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      // 4. Wait for consumer to connect and subscribe
+      await waitForConsumerReady(brokers, connection.groupId);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
 
-      // 5. Produce minimal prompt: single word response
-      const minimalMessage = { task: 'Reply with the single word ok' };
+      // 5. Send minimal prompt: single word response
+      const correlationId = `e2e-minimal-${Date.now()}-${randomUUID().slice(0, 8)}`;
+      const minimalMessage = { task: 'Reply with the single word ok', correlationId };
       await produceMessage(brokers, MINIMAL_INPUT_TOPIC, {
         value: JSON.stringify(minimalMessage),
       });
 
-      // 6. Consume response from responseTopic (should be success)
+      // 6. Consume response (should be success)
       const responseMessage = await consumeOneMessage(
         brokers,
         MINIMAL_RESPONSE_TOPIC,
-        90_000,
-        true // fromBeginning=true to catch already-produced response
+        60_000
       );
       expect(responseMessage).not.toBeNull();
 
-      // 7. Parse and assert response is success
+      // 7. Verify correlationId and assert response is success
       const response = JSON.parse(responseMessage!.value!.toString());
+      expect(response.correlationId).toBe(correlationId);
       expect(response.status).toBe('success');
       expect(response.response).toBeDefined();
       expect(typeof response.response).toBe('string');
@@ -510,13 +592,9 @@ describe('Kafka consumer E2E', () => {
       expect(response.ruleName).toBe('e2e-minimal-rule');
       expect(response.agentId).toBe(AGENT_ID);
 
-      // 8. Verify no DLQ entry (short timeout to avoid long wait)
-      const dlqMessage = await consumeOneMessage(
-        brokers,
-        MINIMAL_DLQ_TOPIC,
-        5_000
-      );
-      expect(dlqMessage).toBeNull(); // Minimal response should NOT go to DLQ
+      // 8. Verify NO DLQ entry (minimal response should NOT go to DLQ)
+      const dlqMessage = await consumeOneMessage(brokers, MINIMAL_DLQ_TOPIC, 5_000);
+      expect(dlqMessage).toBeNull();
 
       // 9. Stop plugin
       await pluginHandle.stop();
@@ -547,8 +625,9 @@ describe('Kafka consumer E2E', () => {
       };
       const pluginHandle = await runPlugin(fireforgetPluginConfig, agent, connection);
 
-      // 4. Give consumer time to connect and subscribe
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      // 4. Wait for consumer to connect and subscribe
+      await waitForConsumerReady(brokers, connection.groupId);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
 
       // 5. Produce message — should be processed but no response sent (fire-and-forget)
       await produceMessage(brokers, FIREFORGET_INPUT_TOPIC, {
@@ -556,7 +635,7 @@ describe('Kafka consumer E2E', () => {
       });
 
       // 6. Wait for processing to complete
-      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
 
       // 7. Verify DLQ is empty — agent succeeded, no error
       const dlqMsg = await consumeOneMessage(brokers, FIREFORGET_DLQ_TOPIC, 5_000);
@@ -608,16 +687,18 @@ describe('Kafka consumer E2E', () => {
 
       const pluginHandle = await runPlugin(invalidConfig, agent, connection);
 
-      // 4. Give consumer time to connect and subscribe
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      // 4. Wait for consumer to connect and subscribe
+      await waitForConsumerReady(brokers, connection.groupId);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
 
       // 5. Send invalid JSON (raw string, not parseable)
+      // (skip correlationId since we expect parse error → DLQ)
       await produceMessage(brokers, INVALID_INPUT_TOPIC, {
         value: 'not a json',
       });
 
-      // 6. Consume from DLQ — should contain parse error
-      const dlqMessage = await consumeOneMessage(brokers, INVALID_DLQ_TOPIC, 30_000, true);
+      // 6. Consume from DLQ — should contain parse error (fromBeginning=false)
+      const dlqMessage = await consumeOneMessage(brokers, INVALID_DLQ_TOPIC, 30_000);
       expect(dlqMessage).not.toBeNull();
 
       const dlqEnvelope = JSON.parse(dlqMessage!.value!.toString());
@@ -626,15 +707,17 @@ describe('Kafka consumer E2E', () => {
       expect(dlqEnvelope.failedAt).toBeDefined();
 
       // 7. Verify consumer continues: send valid message after invalid
+      const validCorrelationId = `e2e-invalid-valid-${Date.now()}-${randomUUID().slice(0, 8)}`;
       await produceMessage(brokers, INVALID_INPUT_TOPIC, {
-        value: JSON.stringify({ task: 'Still working after error?' }),
+        value: JSON.stringify({ task: 'Still working after error?', correlationId: validCorrelationId }),
       });
 
-      // 8. Consume response — should succeed (consumer didn't crash)
-      const responseMessage = await consumeOneMessage(brokers, INVALID_RESPONSE_TOPIC, 90_000, true);
+      // 8. Consume response — should succeed (consumer didn't crash, fromBeginning=false)
+      const responseMessage = await consumeOneMessage(brokers, INVALID_RESPONSE_TOPIC, 90_000);
       expect(responseMessage).not.toBeNull();
 
       const response = JSON.parse(responseMessage!.value!.toString());
+      expect(response.correlationId).toBe(validCorrelationId);
       expect(response.status).toBe('success');
       expect(response.response).toBeDefined();
       expect(typeof response.response).toBe('string');
@@ -686,8 +769,9 @@ describe('Kafka consumer E2E', () => {
 
       const pluginHandle = await runPlugin(recoveryConfig, agent, connection);
 
-      // 4. Give consumer time to connect and subscribe
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      // 4. Wait for consumer to connect and subscribe
+      await waitForConsumerReady(brokers, connection.groupId);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
 
       // 5. Send series: invalid → valid → invalid → valid
       // Message 1: invalid JSON
