@@ -12,7 +12,12 @@ import type { Producer, Consumer, EachMessagePayload } from 'kafkajs';
 import { matchRuleV003 } from '../core/routing.js';
 import { buildPromptV003 } from '../core/prompt.js';
 import { sendToDlq } from './dlq.js';
-import { createKafkaClient, createConsumer, createDlqProducer, createResponseProducer } from './client.js';
+import {
+  createKafkaClient,
+  createConsumer,
+  createDlqProducer,
+  createResponseProducer,
+} from './client.js';
 import { sendResponse } from './response-producer.js';
 import type { IOpenCodeAgent, AgentResult } from '../opencode/IOpenCodeAgent.js';
 
@@ -47,7 +52,7 @@ const DLQ_RATE_LOG_INTERVAL = 100;
  * @see https://kafka.js.org/docs/consuming#a-name-committing-offsets-a-committing-offsets
  */
 export type CommitOffsetsFn = (
-  _offsets: Array<{ topic: string; partition: number; offset: string }>,
+  _offsets: Array<{ topic: string; partition: number; offset: string }>
 ) => Promise<void>;
 
 /**
@@ -73,7 +78,10 @@ export function logDlqRate(state: ConsumerState): void {
   const timeSinceLastLog = currentTime - state.lastDlqRateLogTime;
 
   // Логируем каждые DLQ_RATE_LOG_INTERVAL сообщений
-  if (state.totalMessagesProcessed > 0 && state.totalMessagesProcessed % DLQ_RATE_LOG_INTERVAL === 0) {
+  if (
+    state.totalMessagesProcessed > 0 &&
+    state.totalMessagesProcessed % DLQ_RATE_LOG_INTERVAL === 0
+  ) {
     const dlqRate = (state.dlqMessagesCount / state.totalMessagesProcessed) * 100;
 
     console.log(
@@ -85,7 +93,7 @@ export function logDlqRate(state: ConsumerState): void {
         dlqRatePercent: dlqRate.toFixed(2),
         timeSinceLastLogMs: timeSinceLastLog,
         timestamp: new Date().toISOString(),
-      }),
+      })
     );
 
     state.lastDlqRateLogTime = currentTime;
@@ -111,7 +119,7 @@ export function logConsumerLagMetrics(payload: EachMessagePayload): void {
       offset: payload.message.offset,
       messageTimestamp: payload.message.timestamp,
       timestamp: new Date().toISOString(),
-    }),
+    })
   );
 }
 
@@ -151,7 +159,7 @@ export function isBrokerThrottleError(error: unknown): boolean {
  */
 export async function executeWithThrottleRetry<T>(
   operation: () => Promise<T>,
-  operationName: string,
+  operationName: string
 ): Promise<T> {
   let lastError: Error | undefined;
 
@@ -178,7 +186,7 @@ export async function executeWithThrottleRetry<T>(
           maxAttempts: MAX_THROTTLE_RETRIES,
           error: lastError.message,
           timestamp: new Date().toISOString(),
-        }),
+        })
       );
 
       // Если это последний attempt — выбрасываем ошибку для DLQ
@@ -191,7 +199,7 @@ export async function executeWithThrottleRetry<T>(
             maxAttempts: MAX_THROTTLE_RETRIES,
             error: lastError.message,
             timestamp: new Date().toISOString(),
-          }),
+          })
         );
         throw lastError;
       }
@@ -205,7 +213,7 @@ export async function executeWithThrottleRetry<T>(
           attempt: attempt,
           retryDelayMs: THROTTLE_RETRY_DELAY_MS,
           timestamp: new Date().toISOString(),
-        }),
+        })
       );
 
       await new Promise((resolve) => setTimeout(resolve, THROTTLE_RETRY_DELAY_MS));
@@ -265,7 +273,7 @@ export async function eachMessageHandler(
   state: ConsumerState,
   agent: IOpenCodeAgent,
   responseProducer: Producer,
-  activeSessions?: Set<AbortController>,
+  activeSessions?: Set<AbortController>
 ): Promise<void> {
   // Проверяем состояние shutdown — если shutdown в процессе, не обрабатываем новые сообщения
   if (state.isShuttingDown) {
@@ -276,7 +284,7 @@ export async function eachMessageHandler(
         topic: payload.topic,
         partition: payload.partition,
         offset: payload.message.offset,
-      }),
+      })
     );
     return;
   }
@@ -303,40 +311,56 @@ export async function eachMessageHandler(
             partition: payload.partition,
             offset: payload.message.offset,
             timestamp: new Date().toISOString(),
-          }),
+          })
         );
-        await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
+        await commitOffsets([
+          { topic: payload.topic, partition: payload.partition, offset: payload.message.offset },
+        ]);
         return;
       }
       // Default: отправляем tombstone в DLQ
       const error = new Error('Message value is null (tombstone message)');
-      await sendToDlq(dlqProducer, {
-        value: null,
-        topic: payload.topic,
-        partition: payload.partition,
-        offset: payload.message.offset,
-        originalKey: payload.message.key?.toString() ?? null,
-      }, error);
+      await sendToDlq(
+        dlqProducer,
+        {
+          value: null,
+          topic: payload.topic,
+          partition: payload.partition,
+          offset: payload.message.offset,
+          originalKey: payload.message.key?.toString() ?? null,
+        },
+        error
+      );
       state.dlqMessagesCount++;
       logDlqRate(state);
-      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
+      await commitOffsets([
+        { topic: payload.topic, partition: payload.partition, offset: payload.message.offset },
+      ]);
       return;
     }
 
     // 2. Валидируем размер сообщения (max 1MB)
     const messageSize = messageValue.length;
     if (messageSize > MAX_MESSAGE_SIZE_BYTES) {
-      const error = new Error(`Message size (${messageSize} bytes) exceeds maximum (${MAX_MESSAGE_SIZE_BYTES} bytes)`);
-      await sendToDlq(dlqProducer, {
-        value: messageValue.toString('utf-8'),
-        topic: payload.topic,
-        partition: payload.partition,
-        offset: payload.message.offset,
-        originalKey: payload.message.key?.toString() ?? null,
-      }, error);
+      const error = new Error(
+        `Message size (${messageSize} bytes) exceeds maximum (${MAX_MESSAGE_SIZE_BYTES} bytes)`
+      );
+      await sendToDlq(
+        dlqProducer,
+        {
+          value: messageValue.toString('utf-8'),
+          topic: payload.topic,
+          partition: payload.partition,
+          offset: payload.message.offset,
+          originalKey: payload.message.key?.toString() ?? null,
+        },
+        error
+      );
       state.dlqMessagesCount++;
       logDlqRate(state);
-      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
+      await commitOffsets([
+        { topic: payload.topic, partition: payload.partition, offset: payload.message.offset },
+      ]);
       return;
     }
 
@@ -346,16 +370,22 @@ export async function eachMessageHandler(
       parsedPayload = JSON.parse(messageValue.toString('utf-8'));
     } catch (parseError) {
       const error = parseError instanceof Error ? parseError : new Error('Failed to parse JSON');
-      await sendToDlq(dlqProducer, {
-        value: messageValue.toString('utf-8'),
-        topic: payload.topic,
-        partition: payload.partition,
-        offset: payload.message.offset,
-        originalKey: payload.message.key?.toString() ?? null,
-      }, error);
+      await sendToDlq(
+        dlqProducer,
+        {
+          value: messageValue.toString('utf-8'),
+          topic: payload.topic,
+          partition: payload.partition,
+          offset: payload.message.offset,
+          originalKey: payload.message.key?.toString() ?? null,
+        },
+        error
+      );
       state.dlqMessagesCount++;
       logDlqRate(state);
-      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
+      await commitOffsets([
+        { topic: payload.topic, partition: payload.partition, offset: payload.message.offset },
+      ]);
       return;
     }
 
@@ -365,16 +395,22 @@ export async function eachMessageHandler(
       matchedRule = matchRuleV003(parsedPayload, config.rules);
     } catch (matchError) {
       const error = matchError instanceof Error ? matchError : new Error('Failed to match rule');
-      await sendToDlq(dlqProducer, {
-        value: messageValue.toString('utf-8'),
-        topic: payload.topic,
-        partition: payload.partition,
-        offset: payload.message.offset,
-        originalKey: payload.message.key?.toString() ?? null,
-      }, error);
+      await sendToDlq(
+        dlqProducer,
+        {
+          value: messageValue.toString('utf-8'),
+          topic: payload.topic,
+          partition: payload.partition,
+          offset: payload.message.offset,
+          originalKey: payload.message.key?.toString() ?? null,
+        },
+        error
+      );
       state.dlqMessagesCount++;
       logDlqRate(state);
-      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
+      await commitOffsets([
+        { topic: payload.topic, partition: payload.partition, offset: payload.message.offset },
+      ]);
       return;
     }
 
@@ -388,10 +424,12 @@ export async function eachMessageHandler(
           partition: payload.partition,
           offset: payload.message.offset,
           timestamp: new Date().toISOString(),
-        }),
+        })
       );
       logDlqRate(state);
-      await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
+      await commitOffsets([
+        { topic: payload.topic, partition: payload.partition, offset: payload.message.offset },
+      ]);
       return;
     }
 
@@ -411,7 +449,7 @@ export async function eachMessageHandler(
         prompt: prompt.substring(0, 200) + (prompt.length > 200 ? '...' : ''), // Логируем первые 200 символов
         processingTimeMs: processingTime,
         timestamp: new Date().toISOString(),
-      }),
+      })
     );
 
     // 7. Вызываем OpenCode агента (C2: AbortController для реальной отмены)
@@ -435,6 +473,7 @@ export async function eachMessageHandler(
       // Отправляем response если правило имеет responseTopic
       if (matchedRule.responseTopic) {
         await sendResponse(responseProducer, matchedRule.responseTopic, {
+          correlationId: (parsedPayload as { correlationId?: string }).correlationId,
           messageKey: sessionId,
           sessionId,
           ruleName: matchedRule.name,
@@ -455,20 +494,24 @@ export async function eachMessageHandler(
           agentId: matchedRule.agentId,
           executionTimeMs: agentResult.executionTimeMs,
           timestamp: new Date().toISOString(),
-        }),
+        })
       );
     } else {
       // Агент вернул ошибку или timeout → отправляем в DLQ
       const errorReason = agentResult.status === 'timeout' ? 'Agent timeout' : 'Agent error';
       const errorMsg = agentResult.errorMessage ?? errorReason;
       const error = new Error(`Agent invoke failed: ${errorMsg} (status: ${agentResult.status})`);
-      await sendToDlq(dlqProducer, {
-        value: messageValue.toString('utf-8'),
-        topic: payload.topic,
-        partition: payload.partition,
-        offset: payload.message.offset,
-        originalKey: payload.message.key?.toString() ?? null,
-      }, error);
+      await sendToDlq(
+        dlqProducer,
+        {
+          value: messageValue.toString('utf-8'),
+          topic: payload.topic,
+          partition: payload.partition,
+          offset: payload.message.offset,
+          originalKey: payload.message.key?.toString() ?? null,
+        },
+        error
+      );
       state.dlqMessagesCount++;
 
       console.error(
@@ -481,35 +524,45 @@ export async function eachMessageHandler(
           agentStatus: agentResult.status,
           errorMessage: errorMsg,
           timestamp: new Date().toISOString(),
-        }),
+        })
       );
     }
 
     // 9. Commit offset on success с throttle retry
     logDlqRate(state);
     await executeWithThrottleRetry(
-      () => commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]),
-      'commitOffsets',
+      () =>
+        commitOffsets([
+          { topic: payload.topic, partition: payload.partition, offset: payload.message.offset },
+        ]),
+      'commitOffsets'
     );
   } catch (error) {
     // Любая неожиданная ошибка → DLQ + commit
     const errorMessage = error instanceof Error ? error.message : String(error);
     const dlqError = new Error(`Unexpected error in eachMessageHandler: ${errorMessage}`);
 
-    await sendToDlq(dlqProducer, {
-      value: payload.message.value?.toString('utf-8') ?? null,
-      topic: payload.topic,
-      partition: payload.partition,
-      offset: payload.message.offset,
-      originalKey: payload.message.key?.toString() ?? null,
-    }, dlqError);
+    await sendToDlq(
+      dlqProducer,
+      {
+        value: payload.message.value?.toString('utf-8') ?? null,
+        topic: payload.topic,
+        partition: payload.partition,
+        offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
+      },
+      dlqError
+    );
 
     state.dlqMessagesCount++;
     logDlqRate(state);
 
     await executeWithThrottleRetry(
-      () => commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]),
-      'commitOffsets',
+      () =>
+        commitOffsets([
+          { topic: payload.topic, partition: payload.partition, offset: payload.message.offset },
+        ]),
+      'commitOffsets'
     );
   }
 }
@@ -552,7 +605,7 @@ export async function performGracefulShutdown(
   exitFn: (code: number) => never = process.exit as (code: number) => never,
   // зарезервировано для будущего использования; отмена через AbortController
   _agent?: IOpenCodeAgent,
-  activeSessions?: Set<AbortController>,
+  activeSessions?: Set<AbortController>
 ): Promise<void> {
   // Защита от повторных вызовов
   if (state.isShuttingDown) {
@@ -562,7 +615,7 @@ export async function performGracefulShutdown(
         event: 'shutdown_already_in_progress',
         signal,
         timestamp: new Date().toISOString(),
-      }),
+      })
     );
     return Promise.resolve();
   }
@@ -575,7 +628,7 @@ export async function performGracefulShutdown(
       event: 'graceful_shutdown_started',
       signal,
       timestamp: new Date().toISOString(),
-    }),
+    })
   );
 
   const startTime = Date.now();
@@ -591,7 +644,7 @@ export async function performGracefulShutdown(
             event: 'aborting_active_sessions',
             sessionCount: activeSessions.size,
             timestamp: new Date().toISOString(),
-          }),
+          })
         );
 
         // C2: Вызываем abort() на каждом AbortController
@@ -607,7 +660,7 @@ export async function performGracefulShutdown(
                 event: 'session_abort_failed',
                 error: abortError instanceof Error ? abortError.message : String(abortError),
                 timestamp: new Date().toISOString(),
-              }),
+              })
             );
           }
         }
@@ -619,7 +672,7 @@ export async function performGracefulShutdown(
             totalSessions: activeSessions.size,
             abortedCount,
             timestamp: new Date().toISOString(),
-          }),
+          })
         );
 
         // Очищаем activeSessions после abort
@@ -633,7 +686,7 @@ export async function performGracefulShutdown(
             level: 'info',
             event: 'consumer_disconnect_started',
             timestamp: new Date().toISOString(),
-          }),
+          })
         );
 
         await consumer.disconnect();
@@ -643,7 +696,7 @@ export async function performGracefulShutdown(
             level: 'info',
             event: 'consumer_disconnect_completed',
             timestamp: new Date().toISOString(),
-          }),
+          })
         );
       } catch (consumerError) {
         console.error(
@@ -652,7 +705,7 @@ export async function performGracefulShutdown(
             event: 'consumer_disconnect_failed',
             error: consumerError instanceof Error ? consumerError.message : String(consumerError),
             timestamp: new Date().toISOString(),
-          }),
+          })
         );
         // Продолжаем shutdown даже если consumer.disconnect() не удался
       }
@@ -664,7 +717,7 @@ export async function performGracefulShutdown(
             level: 'info',
             event: 'dlq_producer_disconnect_started',
             timestamp: new Date().toISOString(),
-          }),
+          })
         );
 
         await dlqProducer.disconnect();
@@ -674,16 +727,19 @@ export async function performGracefulShutdown(
             level: 'info',
             event: 'dlq_producer_disconnect_completed',
             timestamp: new Date().toISOString(),
-          }),
+          })
         );
       } catch (dlqProducerError) {
         console.error(
           JSON.stringify({
             level: 'error',
             event: 'dlq_producer_disconnect_failed',
-            error: dlqProducerError instanceof Error ? dlqProducerError.message : String(dlqProducerError),
+            error:
+              dlqProducerError instanceof Error
+                ? dlqProducerError.message
+                : String(dlqProducerError),
             timestamp: new Date().toISOString(),
-          }),
+          })
         );
         // Продолжаем shutdown даже если dlqProducer.disconnect() не удался
       }
@@ -695,7 +751,7 @@ export async function performGracefulShutdown(
             level: 'info',
             event: 'response_producer_disconnect_started',
             timestamp: new Date().toISOString(),
-          }),
+          })
         );
 
         await responseProducer.disconnect();
@@ -705,16 +761,19 @@ export async function performGracefulShutdown(
             level: 'info',
             event: 'response_producer_disconnect_completed',
             timestamp: new Date().toISOString(),
-          }),
+          })
         );
       } catch (responseProducerError) {
         console.error(
           JSON.stringify({
             level: 'error',
             event: 'response_producer_disconnect_failed',
-            error: responseProducerError instanceof Error ? responseProducerError.message : String(responseProducerError),
+            error:
+              responseProducerError instanceof Error
+                ? responseProducerError.message
+                : String(responseProducerError),
             timestamp: new Date().toISOString(),
-          }),
+          })
         );
         // Продолжаем shutdown даже если responseProducer.disconnect() не удался
       }
@@ -724,7 +783,7 @@ export async function performGracefulShutdown(
     await Promise.race([
       shutdownPromise,
       new Promise<void>((_, reject) =>
-        setTimeout(() => reject(new Error('Graceful shutdown timeout')), SHUTDOWN_TIMEOUT_MS),
+        setTimeout(() => reject(new Error('Graceful shutdown timeout')), SHUTDOWN_TIMEOUT_MS)
       ),
     ]);
 
@@ -735,7 +794,7 @@ export async function performGracefulShutdown(
         event: 'graceful_shutdown_completed',
         shutdownTimeMs: shutdownTime,
         timestamp: new Date().toISOString(),
-      }),
+      })
     );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -748,7 +807,7 @@ export async function performGracefulShutdown(
         error: errorMessage,
         shutdownTimeMs: shutdownTime,
         timestamp: new Date().toISOString(),
-      }),
+      })
     );
 
     // Force exit после timeout
@@ -759,7 +818,7 @@ export async function performGracefulShutdown(
         signal,
         shutdownTimeMs: shutdownTime,
         timestamp: new Date().toISOString(),
-      }),
+      })
     );
 
     exitFn(1);
@@ -791,7 +850,7 @@ export async function performGracefulShutdown(
  */
 export async function startConsumer(
   config: PluginConfigV003,
-  agent: IOpenCodeAgent,
+  agent: IOpenCodeAgent
 ): Promise<void> {
   console.log(
     JSON.stringify({
@@ -800,7 +859,7 @@ export async function startConsumer(
       topics: config.topics,
       rulesCount: config.rules.length,
       timestamp: new Date().toISOString(),
-    }),
+    })
   );
 
   // 1. Создаем Kafka клиент (FR-019)
@@ -834,7 +893,7 @@ export async function startConsumer(
         level: 'info',
         event: 'consumer_connected',
         timestamp: new Date().toISOString(),
-      }),
+      })
     );
 
     await dlqProducer.connect();
@@ -843,7 +902,7 @@ export async function startConsumer(
         level: 'info',
         event: 'dlq_producer_connected',
         timestamp: new Date().toISOString(),
-      }),
+      })
     );
 
     await responseProducer.connect();
@@ -852,7 +911,7 @@ export async function startConsumer(
         level: 'info',
         event: 'response_producer_connected',
         timestamp: new Date().toISOString(),
-      }),
+      })
     );
 
     // 6. Подписываемся на все топики из конфигурации
@@ -863,7 +922,7 @@ export async function startConsumer(
         event: 'consumer_subscribed',
         topics: config.topics,
         timestamp: new Date().toISOString(),
-      }),
+      })
     );
 
     // 7. Регистрируем SIGTERM/SIGINT handlers для graceful shutdown
@@ -874,7 +933,7 @@ export async function startConsumer(
           event: 'shutdown_signal_received',
           signal,
           timestamp: new Date().toISOString(),
-        }),
+        })
       );
 
       // Выполняем graceful shutdown с agent и activeSessions (FR-016)
@@ -886,7 +945,7 @@ export async function startConsumer(
         state,
         process.exit as (code: number) => never,
         agent,
-        activeSessions,
+        activeSessions
       );
 
       // Выходим из процесса после успешного shutdown
@@ -903,39 +962,50 @@ export async function startConsumer(
         event: 'kafka_consumer_started',
         topics: config.topics,
         timestamp: new Date().toISOString(),
-      }),
+      })
     );
 
     // 9. Запускаем consumer с eachMessage handler (FR-023)
     // consumer.run() никогда не resolve — запускаем без await
-    consumer.run({
-      autoCommit: false, // Required: manual offset commit via commitOffsets()
-      eachMessage: async (payload: EachMessagePayload) => {
-        await eachMessageHandler(payload, config, dlqProducer, consumer.commitOffsets.bind(consumer), state, agent, responseProducer, activeSessions);
-      },
-    }).catch((error) => {
-      // Фатальная ошибка в run loop — пытаемся выполнить graceful shutdown
-      console.error(
-        JSON.stringify({
-          level: 'error',
-          event: 'consumer_run_loop_error',
-          error: error instanceof Error ? error.message : String(error),
-          timestamp: new Date().toISOString(),
-        }),
-      );
+    consumer
+      .run({
+        autoCommit: false, // Required: manual offset commit via commitOffsets()
+        eachMessage: async (payload: EachMessagePayload) => {
+          await eachMessageHandler(
+            payload,
+            config,
+            dlqProducer,
+            consumer.commitOffsets.bind(consumer),
+            state,
+            agent,
+            responseProducer,
+            activeSessions
+          );
+        },
+      })
+      .catch((error) => {
+        // Фатальная ошибка в run loop — пытаемся выполнить graceful shutdown
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            event: 'consumer_run_loop_error',
+            error: error instanceof Error ? error.message : String(error),
+            timestamp: new Date().toISOString(),
+          })
+        );
 
-      // Выполняем graceful shutdown при ошибке
-      performGracefulShutdown(
-        consumer,
-        dlqProducer,
-        responseProducer,
-        'ERROR',
-        state,
-        process.exit as (code: number) => never,
-        agent,
-        activeSessions,
-      ).finally(() => process.exit(1));
-    });
+        // Выполняем graceful shutdown при ошибке
+        performGracefulShutdown(
+          consumer,
+          dlqProducer,
+          responseProducer,
+          'ERROR',
+          state,
+          process.exit as (code: number) => never,
+          agent,
+          activeSessions
+        ).finally(() => process.exit(1));
+      });
 
     // startConsumer() возвращает здесь после успешной инициализации
     // Consumer продолжает работать в фоновом режиме
@@ -948,7 +1018,7 @@ export async function startConsumer(
         event: 'kafka_consumer_error',
         error: errorMessage,
         timestamp: new Date().toISOString(),
-      }),
+      })
     );
 
     // Graceful shutdown даже в случае ошибки (FR-016)
@@ -960,7 +1030,7 @@ export async function startConsumer(
       state,
       process.exit as (code: number) => never,
       agent,
-      activeSessions,
+      activeSessions
     );
 
     process.exit(1);

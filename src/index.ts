@@ -61,7 +61,7 @@ export default async function plugin(context: PluginContext): Promise<PluginHook
         event: 'plugin_start_failed',
         error: errorMessage,
         timestamp: new Date().toISOString(),
-      }),
+      })
     );
 
     throw error;

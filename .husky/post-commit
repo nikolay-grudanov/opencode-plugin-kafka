@@ -1,0 +1,34 @@
+#!/bin/bash
+# post-commit hook: автоматический майнинг изменённых файлов в mempalace
+# wing: opencode-plugin-kafka
+
+set -e
+
+# Путь к проекту
+PROJECT_DIR="$(git rev-parse --show-toplevel)"
+
+cd "$PROJECT_DIR"
+
+# Получаем список изменённых файлов в последнем коммите
+COMMIT_FILES=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null || echo "")
+
+if [ -z "$COMMIT_FILES" ]; then
+    exit 0
+fi
+
+# Фильтруем только нужные папки (по mempalace.yaml)
+VALID_DIRS="src specs docs scripts tests"
+
+for file in $COMMIT_FILES; do
+    for dir in $VALID_DIRS; do
+        case "$file" in
+            "$dir"/* | "$dir")
+                echo "[mempalace] Mining: $file"
+                npx mempalace mine "$PROJECT_DIR/$file" --wing opencode-plugin-kafka 2>/dev/null || {
+                    echo "[mempalace] Warning: failed to mine $file"
+                }
+                break
+                ;;
+        esac
+    done
+done

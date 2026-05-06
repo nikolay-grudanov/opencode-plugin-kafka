@@ -3,11 +3,12 @@
   "instructions": [".opencode/rules/*.md"],
   "permission":
     { 
-        "graphify*": "allow"
+        "graphify*": "allow",
+        "mempalace*": "deny"
     },
   "agent": {
     "general": {
-      "model": "minimax-coding-plan/MiniMax-M2.7",
+      "model": "minimax-coding-plan/MiniMax-M2.5",
       "permission": {
         "*": "allow"
       }
@@ -118,6 +119,16 @@
           "*": "deny",
           "code-*": "allow"
         }
+      }
+    },
+    "e2e-responder": {
+      "description": "Тестовый агент для E2E-тестирования. Отвечает кратко, без инструментов.",
+      "mode": "subagent",
+      "model": "lemonade/extra.Qwen3.5-9B-GGUF",
+      "prompt": "{file:agents/e2e-responder.md}",
+      "temperature": 0.1,
+      "permission": {
+        "*": "deny"
       }
     }
   },

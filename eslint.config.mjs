@@ -1,43 +1,32 @@
-import typescriptEslint from "@typescript-eslint/eslint-plugin";
-import typescriptParser from "@typescript-eslint/parser";
-import eslintConfigPrettier from "eslint-config-prettier";
+import tseslint from '@typescript-eslint/eslint-plugin';
+import tsparser from '@typescript-eslint/parser';
+import prettierConfig from 'eslint-config-prettier';
 
+// ESLint v10 flat config для TypeScript
 export default [
   {
-    files: ["src/**/*.ts"],
-    languageOptions: {
-      parser: typescriptParser,
-      parserOptions: {
-        ecmaVersion: 2022,
-        sourceType: "module",
-      },
-    },
-    plugins: {
-      "@typescript-eslint": typescriptEslint,
-    },
-    rules: {
-      ...typescriptEslint.configs.recommended.rules,
-      "no-unused-vars": "off",
-      "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
-    },
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '*.md'],
   },
+  // Основная конфигурация для src и тестов (кроме e2e)
   {
-    files: ["tests/**/*.ts"],
+    files: ['src/**/*.ts', 'tests/unit/**/*.ts', 'tests/integration/**/*.ts'],
     languageOptions: {
-      parser: typescriptParser,
+      parser: tsparser,
       parserOptions: {
+        project: './tsconfig.json',
+        tsconfigRootDir: import.meta.dirname,
         ecmaVersion: 2022,
-        sourceType: "module",
+        sourceType: 'module',
       },
     },
     plugins: {
-      "@typescript-eslint": typescriptEslint,
+      '@typescript-eslint': tseslint,
     },
     rules: {
-      ...typescriptEslint.configs.recommended.rules,
-      "no-unused-vars": "off",
-      "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+      ...tseslint.configs['flat/recommended'].rules,
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
-  eslintConfigPrettier,
+  prettierConfig,
 ];

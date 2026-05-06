@@ -25,11 +25,15 @@ export function validateTopicCoverage(config: PluginConfigV003): void {
   const inputTopics = new Set(config.topics);
 
   for (const rule of config.rules) {
-    if (rule.responseTopic !== undefined && rule.responseTopic !== null && rule.responseTopic !== '') {
+    if (
+      rule.responseTopic !== undefined &&
+      rule.responseTopic !== null &&
+      rule.responseTopic !== ''
+    ) {
       if (inputTopics.has(rule.responseTopic)) {
         throw new Error(
           `FR-017 topic coverage violation: responseTopic "${rule.responseTopic}" ` +
-          `cannot be one of the input topics: ${config.topics.join(', ')}`
+            `cannot be one of the input topics: ${config.topics.join(', ')}`
         );
       }
     }
@@ -66,9 +70,7 @@ export function parseConfig(): PluginConfig {
     rawJson = JSON.parse(fileContent);
   } catch (error) {
     if (error instanceof SyntaxError) {
-      throw new Error(
-        `Invalid JSON in config file ${configPath}: ${error.message}`
-      );
+      throw new Error(`Invalid JSON in config file ${configPath}: ${error.message}`);
     }
     // Ошибка файловой системы
     throw new Error(
@@ -125,9 +127,7 @@ export function parseConfigV003(): PluginConfigV003 {
     rawJson = JSON.parse(fileContent);
   } catch (error) {
     if (error instanceof SyntaxError) {
-      throw new Error(
-        `Invalid JSON in config file ${configPath}: ${error.message}`
-      );
+      throw new Error(`Invalid JSON in config file ${configPath}: ${error.message}`);
     }
     // Ошибка файловой системы
     throw new Error(

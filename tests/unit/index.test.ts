@@ -51,10 +51,10 @@ describe('plugin', () => {
           delete: vi.fn().mockResolvedValue(undefined),
         },
       } as never,
-      project: null,
+      project: null as never,
       directory: '/test',
       worktree: '/test',
-      $: vi.fn(),
+      $: vi.fn().mockResolvedValue('') as never,
     };
   });
 

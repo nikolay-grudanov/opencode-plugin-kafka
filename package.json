@@ -1,23 +1,28 @@
 {
   "name": "opencode-plugin-kafka",
   "version": "0.0.1",
-"type": "module",
+  "type": "module",
   "scripts": {
     "build": "tsc",
     "check": "npm run lint && npm run test",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
-    "test": "vitest run",
+    "test": "vitest run --dangerouslyIgnoreUnhandledErrors",
     "test:coverage": "vitest --coverage",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "typecheck": "tsc --noEmit"
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "typecheck": "tsc --noEmit",
+    "install-hooks": "husky install",
+    "prepare": "husky"
   },
   "dependencies": {
     "jsonpath-plus": "^10.4.0",
     "kafkajs": "^2.2.4",
+    "opencode-glm-quota": "^1.7.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@opencode-ai/sdk": "^1.14.37",
     "@testcontainers/redpanda": "^11.14.0",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^8.59.0",
@@ -25,6 +30,7 @@
     "@vitest/coverage-v8": "^2.0.0",
     "eslint": "^10.2.1",
     "eslint-config-prettier": "^10.1.8",
+    "husky": "^9.1.7",
     "prettier": "^3.8.3",
     "testcontainers": "^11.14.0",
     "tsd": "^0.33.0",

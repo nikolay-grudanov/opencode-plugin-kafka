@@ -8,13 +8,13 @@
  * docker daemon или podman socket.
  */
 
-import type { StartedTestContainer } from 'testcontainers';
+import type { StartedTestContainer, StoppedTestContainer } from 'testcontainers';
 
 /**
  * Mock контейнер для интеграционных тестов
  * Симулирует поведение StartedTestContainer без реального container runtime
  */
-class MockStartedTestContainer implements StartedTestContainer {
+class MockStartedTestContainer {
   private host = 'localhost';
   private mappedPorts = new Map<number, number>();
 
@@ -32,8 +32,9 @@ class MockStartedTestContainer implements StartedTestContainer {
     return this.mappedPorts.get(port) || port;
   }
 
-  async stop(): Promise<void> {
-    // Mock cleanup - ничего не делать
+  async stop(): Promise<unknown> {
+    // Mock cleanup - возвращаем StoppedTestContainer mock
+    return {} as StoppedTestContainer;
   }
 }
 
@@ -54,7 +55,7 @@ class MockStartedTestContainer implements StartedTestContainer {
 export async function createRedpandaContainer(): Promise<StartedTestContainer> {
   // Для CI/CD без docker daemon используем mock контейнер
   // Это позволяет тестировать routing flow без container runtime
-  return new MockStartedTestContainer();
+  return new MockStartedTestContainer() as unknown as StartedTestContainer;
 }
 
 /**

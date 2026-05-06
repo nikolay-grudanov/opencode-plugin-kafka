@@ -88,7 +88,7 @@ describe('AgentError', () => {
     const error = new AgentError('Agent invocation failed', original);
 
     expect(error.originalError).toBe(original);
-    expect(error.originalError?.message).toBe('SDK connection refused');
+    expect((error.originalError as Error)?.message).toBe('SDK connection refused');
   });
 
   it('имеет undefined originalError когда не передан', () => {
@@ -138,9 +138,46 @@ describe('AgentError', () => {
     expect(error.getOriginalErrorMessage()).toBeUndefined();
   });
 
+  it('getOriginalErrorMessage возвращает undefined когда originalError явно передан как undefined', () => {
+    const error = new AgentError('Agent failed', undefined);
+
+    expect(error.originalError).toBeUndefined();
+    expect(error.getOriginalErrorMessage()).toBeUndefined();
+  });
+
+  it('getOriginalErrorMessage возвращает message когда originalError number', () => {
+    const error = new AgentError('Agent failed', 404);
+
+    expect(error.originalError).toBe(404);
+    expect(error.getOriginalErrorMessage()).toBe('404');
+  });
+
+  it('getOriginalErrorMessage возвращает undefined когда originalError boolean', () => {
+    const error = new AgentError('Agent failed', false);
+
+    expect(error.originalError).toBe(false);
+    expect(error.getOriginalErrorMessage()).toBeUndefined();
+  });
+
   it('getOriginalErrorMessage возвращает undefined когда originalError отсутствует', () => {
     const error = new AgentError('Agent failed');
 
     expect(error.getOriginalErrorMessage()).toBeUndefined();
+  });
+
+  // ========================================================================
+  // Дополнительные тесты для достижения 90%+ functions coverage
+  // ========================================================================
+
+  it('getOriginalErrorMessage возвращает message когда originalError Symbol', () => {
+    const error = new AgentError('Agent failed', Symbol('ERR_SYMBOL'));
+
+    expect(error.getOriginalErrorMessage()).toBe('Symbol(ERR_SYMBOL)');
+  });
+
+  it('getOriginalErrorMessage возвращает message когда originalError BigInt', () => {
+    const error = new AgentError('Agent failed', BigInt(123));
+
+    expect(error.getOriginalErrorMessage()).toBe('123');
   });
 });

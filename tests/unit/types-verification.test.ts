@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { Rule, PluginConfig, Payload, RuleSchema, PluginConfigSchema } from '../../src/schemas/index.js';
+import type { RuleV003, PluginConfigV003 } from '../../src/schemas/index.js';
 
 // SC-008: Verify z.infer<> types are correctly exported
 // Compile-time check: type annotations verify Rule, PluginConfig, Payload are correct
@@ -23,6 +24,7 @@ describe('Type exports from schemas/index.ts (SC-008)', () => {
       name: 'test-rule',
       topic: 'test-topic',
       agent: 'test-agent',
+      prompt_field: '$',
     };
 
     expect(rule.name).toBe('test-rule');
@@ -50,13 +52,12 @@ describe('Type exports from schemas/index.ts (SC-008)', () => {
       name: 'test-rule',
       topic: 'test-topic',
       agent: 'test-agent',
+      prompt_field: '$',
     };
 
     expect(rule.condition).toBeUndefined();
     expect(rule.command).toBeUndefined();
-    // Note: prompt_field default '$' is applied at PARSE time, not at object creation
-    // When creating objects directly, prompt_field is undefined unless explicitly set
-    expect(rule.prompt_field).toBeUndefined();
+    expect(rule.prompt_field).toBe('$');
   });
 
   it('RuleSchema.parse applies default for prompt_field', () => {
@@ -74,8 +75,8 @@ describe('Type exports from schemas/index.ts (SC-008)', () => {
     const config: PluginConfig = {
       topics: ['security', 'audit'],
       rules: [
-        { name: 'r1', topic: 'security', agent: 'a1' },
-        { name: 'r2', topic: 'audit', agent: 'a2' },
+        { name: 'r1', topic: 'security', agent: 'a1', prompt_field: '$' },
+        { name: 'r2', topic: 'audit', agent: 'a2', prompt_field: '$' },
       ],
     };
 
@@ -117,5 +118,74 @@ describe('Type exports from schemas/index.ts (SC-008)', () => {
     const config: PluginConfig = parsed;
     expect(config.topics[0]).toBe('topic1');
     expect(config.rules[0].agent).toBe('a1');
+  });
+});
+
+// SC-008: Verify V003 types are correctly exported
+describe('Type exports for RuleV003 and PluginConfigV003 (SC-008)', () => {
+  it('RuleV003 type has all required fields', () => {
+    // Compile-time: this assignment verifies RuleV003 has all required fields
+    const rule: RuleV003 = {
+      name: 'test-rule',
+      jsonPath: '$.status',
+      promptTemplate: 'Process {$.status}',
+      agentId: 'agent-1',
+      timeoutMs: 120_000,
+      concurrency: 1,
+    };
+
+    expect(rule.name).toBe('test-rule');
+    expect(rule.jsonPath).toBe('$.status');
+    expect(rule.promptTemplate).toBe('Process {$.status}');
+    expect(rule.agentId).toBe('agent-1');
+    expect(rule.timeoutMs).toBe(120_000);
+    expect(rule.concurrency).toBe(1);
+  });
+
+  it('RuleV003 type allows optional responseTopic', () => {
+    const rule: RuleV003 = {
+      name: 'test-rule',
+      jsonPath: '$.status',
+      promptTemplate: 'Process {$.status}',
+      agentId: 'agent-1',
+      timeoutMs: 120_000,
+      concurrency: 1,
+      responseTopic: 'response-topic',
+    };
+
+    expect(rule.responseTopic).toBe('response-topic');
+  });
+
+  it('RuleV003 type allows omitting optional fields', () => {
+    const rule: RuleV003 = {
+      name: 'test-rule',
+      jsonPath: '$.status',
+      promptTemplate: 'Process {$.status}',
+      agentId: 'agent-1',
+      timeoutMs: 120_000,
+      concurrency: 1,
+      // responseTopic optional
+    };
+
+    expect(rule.responseTopic).toBeUndefined();
+  });
+
+  it('PluginConfigV003 type correctly contains topics and rules', () => {
+    const config: PluginConfigV003 = {
+      topics: ['input-topic', 'output-topic'],
+      rules: [
+        {
+          name: 'r1',
+          jsonPath: '$.status',
+          promptTemplate: 'Process',
+          agentId: 'a1',
+          timeoutMs: 120_000,
+          concurrency: 1,
+        },
+      ],
+    };
+
+    expect(config.topics).toHaveLength(2);
+    expect(config.rules).toHaveLength(1);
   });
 });
