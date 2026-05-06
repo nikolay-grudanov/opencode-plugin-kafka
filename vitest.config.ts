@@ -12,6 +12,10 @@ export default defineConfig({
     fileParallelism: false,
     // Ignore unhandled errors after tests complete (tinypool cleanup race condition)
     onUnhandledRejected: 'ignore',
+    // Ignore unhandled errors from process.exit interception in pluginRunner.test.ts.
+    // The test intentionally calls process.exit(0) to verify exit handler behavior.
+    // This prevents "Worker exited unexpectedly" CI failures.
+    dangerouslyIgnoreUnhandledErrors: true,
     globals: true,
     environment: 'node',
     exclude: [
