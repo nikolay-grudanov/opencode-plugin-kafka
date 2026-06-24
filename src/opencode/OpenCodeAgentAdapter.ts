@@ -127,7 +127,11 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
       }
 
       // 1. Создаём новую сессию
-      const session = await this.client.session.create({ body: { title: `kafka-plugin-${agentId}` } });
+      // OpenCode SDK 1.17.x wraps response in {data: Session} envelope;
+      // we normalize to plain Session for the rest of the code.
+      const sessionResponse = await this.client.session.create({ body: { title: `kafka-plugin-${agentId}` } });
+      const session = (sessionResponse as { data?: { id: string } }).data
+        ?? (sessionResponse as { id: string });
       sessionId = session.id;
 
       if (this.mode === 'polling') {

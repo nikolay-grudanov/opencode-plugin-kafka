@@ -5,6 +5,86 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru-RU/),
  и проект придерживается [Семантического Версионирования](https://semver.org/lang/ru/).
 
+## [0.5.0] — 2026-06-25
+
+### Added — spec-010: Multi-Turn Session Delivery
+
+ADR-010 (Multi-Turn Session Delivery) builds on ADR-009 (tool-based
+delivery) to support **stateful chat-from-Kafka** workflows. When the
+Kafka payload contains a `sessionId` field, the plugin resumes the
+existing OpenCode session instead of creating a new one, so the LLM
+sees all previous user/assistant messages in context.
+
+**New architecture** (additive — no breaking changes):
+
+1. `RuleV003Schema` gains `resumeFromPayloadField?: string | null`
+   (default `"sessionId"`, set `null` to disable resume per rule).
+2. New `src/session-resume.ts` module with three helpers:
+   - `extractSessionId(payload, rule)` — JSONPath extract via
+     `jsonpath-plus`, validates string type, returns null for
+     rule-disabled/absent/invalid values
+   - `verifySessionExists(client, sessionId)` — `client.session.get()`
+     lookup, returns `{ok: true}` or `{ok: false, reason}` discriminated
+     union
+   - `decideResume(client, existingSessionId, rule)` — orchestrates
+     extract+verify, returns `ResumeDecision` enum
+3. `OpenCodeAgentAdapter.invoke()` accepts optional `existingSessionId`
+   in `InvokeOptions`. When provided, calls `decideResume()` to verify
+   the session via SDK; if found, dispatches to `invokeResumedSession()`
+   which skips `session.create()` and uses the existing sessionId in
+   `session.prompt({path: {id: existingSessionId}, body: {...}})`.
+4. `eachMessageHandler()` extracts sessionId from payload using rule's
+   `resumeFromPayloadField` JSONPath and passes it via
+   `existingSessionId` in `agent.invoke()` options.
+5. Response envelope gains `resumed?: boolean` flag (true when
+   sessionId from payload was used).
+6. DLQ envelope gains `resumeAttempted?: boolean` +
+   `attemptedSessionId?: string` for diagnosing resume failures.
+7. Session lifecycle event `kafka_message_lifecycle` gains new
+   phases: `session_created`, `session_resumed`. Plus structured
+   events `session_resume_attempted`, `session_resume_succeeded`,
+   `session_resume_failed reason=...`.
+
+**Live debug verification (2026-06-25)**:
+- msg1 without sessionId → new session, `resumed: false`
+- msg2 with `sessionId: "ses_xxx"` (from msg1's response) → resumed,
+  `resumed: true` ✅
+- msg3 with invalid sessionId `ses_nonexistent_xyz` → warning
+  `session_resume_failed reason=not-found fallback=new_session`, new
+  session, `resumed: false`
+
+### Fixed (live debug)
+
+- **Critical sessionId envelope bug** (introduced in spec-009): the
+  plugin used `session.id` directly from `session.create()` return
+  value, but OpenCode SDK 1.17.x wraps the response in a
+  `{data: Session}` envelope. The plugin stored `undefined` as
+  sessionId in the response envelope, breaking multi-turn resume.
+  Fixed by unwrapping `(response as {data?: Session}).data ??
+  response` before accessing `.id`.
+
+### Migration from 0.4.x
+
+Existing `kafka-router.json` configs work unchanged. Default
+`resumeFromPayloadField: "sessionId"` is a no-op when payload has
+no such field. To explicitly disable resume for a rule, set
+`resumeFromPayloadField: null`.
+
+### Migration from 0.4.x for response consumers
+
+Response envelope now always contains `sessionId` (was previously
+`undefined` due to the unwrap bug). External consumers that
+previously null-checked `response.sessionId` can now rely on it
+being populated for every message.
+
+### Test Coverage
+
+- Unit: 371/371 passed (was 352 before spec-010; +19 new tests
+  across `tests/unit/session-resume.test.ts` (17) and
+  `tests/unit/opencode/adapter.test.ts` (+3 new resume branch tests,
+  -1 cleaned up).
+- Typecheck, lint, build: 0 errors.
+
 ## [0.4.0] — 2026-06-25
 
 ### Changed — spec-009: Tool-Based Response Delivery
