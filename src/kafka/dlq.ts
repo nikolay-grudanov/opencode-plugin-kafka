@@ -77,6 +77,14 @@ export interface DlqEnvelope {
 
   /** How long the session lived before being DLQ'd (ms). */
   sessionDurationMs?: number;
+
+  // --- spec-010: multi-turn session resume diagnostics ---
+
+  /** Was a sessionId from payload attempted? */
+  resumeAttempted?: boolean;
+
+  /** The sessionId that was attempted for resume (if resumeAttempted=true). */
+  attemptedSessionId?: string;
 }
 
 /**

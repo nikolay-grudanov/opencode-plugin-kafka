@@ -6,7 +6,9 @@ export default defineConfig({
     environment: 'node',
     exclude: [
       'tests/integration/**',
+      'tests/e2e/**',
       '**/*.integration.test.ts',
+      '**/*.e2e.test.ts',
       'node_modules/**',
       '.opencode/**',
     ],

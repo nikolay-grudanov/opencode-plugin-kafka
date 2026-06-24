@@ -54,6 +54,12 @@ export interface InvokeOptions {
   timeoutMs: number;
   /** Signal для отмены запроса (C2: заменяет фейковый UUID на AbortController) */
   signal?: AbortSignal;
+  /**
+   * spec-010: if provided, skip session.create() and use this existing
+   * OpenCode session for the prompt. The caller MUST have verified the
+   * session exists via session.get() before passing this.
+   */
+  existingSessionId?: string;
 }
 
 // ============================================================================

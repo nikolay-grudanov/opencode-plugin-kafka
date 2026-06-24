@@ -125,6 +125,17 @@ export const RuleV003Schema = z.object({
   safetyNetTimeoutMs: z.number().int().positive().default(60_000),
   // maxSessionMs: hard wall-clock guard — session exceeding this is force-DLQ'd
   maxSessionMs: z.number().int().positive().default(300_000),
+
+  // --- spec-010: multi-turn session delivery ---
+  // resumeFromPayloadField: JSONPath in Kafka payload where sessionId is read.
+  // When set (or default "sessionId"), the plugin resumes an existing OpenCode
+  // session when the payload contains a valid sessionId. Set to null to disable
+  // resume for this rule (always create new session).
+  resumeFromPayloadField: z
+    .string()
+    .nullish()
+    .transform((v) => (v === null || v === '' ? null : v))
+    .default('sessionId'),
 });
 
 /**

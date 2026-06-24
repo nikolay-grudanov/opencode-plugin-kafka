@@ -418,11 +418,19 @@ export async function eachMessageHandler(
     const abortController = new AbortController();
     activeSessions?.add(abortController);
 
+    // spec-010: Extract sessionId from payload for multi-turn resume.
+    // If rule.resumeFromPayloadField is set and payload has a usable
+    // sessionId, the adapter will resume that existing session instead
+    // of creating a new one.
+    const { extractSessionId } = await import('../session-resume.js');
+    const resumeSessionId = extractSessionId(parsedPayload, matchedRule);
+
     let agentResult: AgentResult;
     try {
       agentResult = await agent.invoke(prompt, matchedRule.agentId, {
         timeoutMs: matchedRule.timeoutMs ?? 120_000,
         signal: abortController.signal,
+        existingSessionId: resumeSessionId ?? undefined,
       });
     } finally {
       activeSessions?.delete(abortController); // гарантированная очистка во всех путях
@@ -430,6 +438,7 @@ export async function eachMessageHandler(
 
     // 8. Обрабатываем результат агента — отправляем response или DLQ
     const sessionId = agentResult.sessionId;
+    const wasResumed = resumeSessionId !== null && sessionId === resumeSessionId;
 
     if (agentResult.status === 'success') {
       // Отправляем response если правило имеет responseTopic
@@ -443,8 +452,23 @@ export async function eachMessageHandler(
           status: 'success',
           executionTimeMs: agentResult.executionTimeMs,
           timestamp: new Date().toISOString(),
+          resumed: wasResumed,
         });
       }
+      // spec-010: emit session lifecycle phase
+      const sessionPhase = wasResumed ? 'session_resumed' : 'session_created';
+      console.log(
+        JSON.stringify({
+          level: 'info',
+          event: 'kafka_message_lifecycle',
+          phase: sessionPhase,
+          sessionId,
+          ruleName: matchedRule.name,
+          agentId: matchedRule.agentId,
+          executionTimeMs: agentResult.executionTimeMs,
+          timestamp: new Date().toISOString(),
+        }),
+      );
       // Логируем успешное выполнение
       console.log(
         JSON.stringify({
@@ -453,6 +477,7 @@ export async function eachMessageHandler(
           sessionId,
           ruleName: matchedRule.name,
           agentId: matchedRule.agentId,
+          resumed: wasResumed,
           executionTimeMs: agentResult.executionTimeMs,
           timestamp: new Date().toISOString(),
         }),

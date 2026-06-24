@@ -29,6 +29,8 @@ export interface ResponseMessage {
   executionTimeMs: number;
   /** Время отправки (ISO 8601) */
   timestamp: string;
+  /** spec-010: true если это продолжение существующей сессии (resume) */
+  resumed?: boolean;
 }
 
 /**

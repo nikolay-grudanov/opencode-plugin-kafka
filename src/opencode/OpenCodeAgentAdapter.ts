@@ -28,6 +28,7 @@ import type { RuleV003 } from '../schemas/index.js';
 import { TimeoutError, AgentError } from './AgentError.js';
 import { extractResponseText } from './utils.js';
 import { registerSessionWatcher } from './session-watchers.js';
+import { decideResume } from '../session-resume.js';
 
 /**
  * Mode the adapter operates in, controlled by the `pollingFallback` toggle.
@@ -97,14 +98,37 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
     let sessionId = '';
 
     try {
-      // 1. Создаём новую сессию
-      const session = await this.client.session.create({ body: { title: `kafka-plugin-${agentId}` } });
-      sessionId = session.id;
-
       // 2. Проверяем signal на early abort (C2)
       if (options.signal?.aborted) {
         throw new AgentError('Operation was aborted');
       }
+
+      // spec-010: If existingSessionId provided, verify it exists via SDK.
+      // If yes → resume. If no (lookup failure) → fall back to new session.
+      let effectiveExistingSessionId: string | undefined = undefined;
+      if (options.existingSessionId) {
+        const decision = await decideResume(
+          this.client as unknown as Parameters<typeof decideResume>[0],
+          options.existingSessionId,
+          { resumeFromPayloadField: 'sessionId' }
+        );
+        if (decision.kind === 'resume-existing') {
+          effectiveExistingSessionId = decision.sessionId;
+        }
+        // For 'resume-fallback-new' and 'new', effectiveExistingSessionId
+        // remains undefined — adapter will create new session below.
+      }
+
+      // spec-010: If effectiveExistingSessionId set, skip session.create()
+      if (effectiveExistingSessionId) {
+        return await this.invokeResumedSession(
+          prompt, agentId, effectiveExistingSessionId, options, startTime
+        );
+      }
+
+      // 1. Создаём новую сессию
+      const session = await this.client.session.create({ body: { title: `kafka-plugin-${agentId}` } });
+      sessionId = session.id;
 
       if (this.mode === 'polling') {
         // Legacy polling mode (spec-008 fallback) — blocks waiting for prompt response
@@ -206,6 +230,75 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
       status: 'success',
       response: '', // intentionally empty in tool-based mode
       sessionId,
+      executionTimeMs: Date.now() - startTime,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Resumed session invoke (spec-010): uses an existing OpenCode session
+   * instead of creating a new one. Skips session.create() entirely.
+   * Caller MUST have verified session exists via session.get() before
+   * passing existingSessionId.
+   *
+   * Behavior:
+   * - No session.create() call (saves one round-trip)
+   * - Register SessionWatcher with the existing sessionId
+   * - Call session.prompt({path: {id: existingSessionId}, body: {...}})
+   * - OpenCode SDK injects previous message history into LLM context
+   *   automatically
+   * - Return success immediately (tool-based async, same as invokeToolBased)
+   *
+   * NOTE: The agentId param here may differ from the session's original
+   * agent — we trust the rule to send the right prompt. The session
+   * continues with whatever agent it was created with (per OpenCode
+   * SDK behavior).
+   */
+  private async invokeResumedSession(
+    prompt: string,
+    agentId: string,
+    existingSessionId: string,
+    _options: InvokeOptions,
+    startTime: number
+  ): Promise<AgentResult> {
+    // Signal abort check (C2) — same as new session path
+    if (_options.signal?.aborted) {
+      throw new AgentError('Operation was aborted');
+    }
+
+    // Register SessionWatcher for the existing session — allows
+    // event-handler safety net to fire for this turn.
+    const abortController = new AbortController();
+    const ruleStub: Pick<RuleV003, 'name' | 'agentId' | 'responseTopic'> = {
+      name: `resumed-${agentId}`,
+      agentId,
+      responseTopic: undefined,
+    };
+    registerSessionWatcher(existingSessionId, ruleStub, abortController);
+
+    // Send prompt to EXISTING session. OpenCode automatically injects
+    // previous message history — no extra work needed.
+    try {
+      await this.client.session.prompt({
+        path: { id: existingSessionId },
+        body: {
+          parts: [{ type: 'text', text: prompt }],
+          agent: agentId,
+        },
+      });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      abortController.abort();
+      throw err;
+    }
+
+    // Return success immediately. Real response lands in Kafka via the
+    // send_to_kafka_<rule> tool handler when LLM calls it (same as
+    // new-session tool-based flow).
+    return {
+      status: 'success',
+      response: '',
+      sessionId: existingSessionId,
       executionTimeMs: Date.now() - startTime,
       timestamp: new Date().toISOString(),
     };

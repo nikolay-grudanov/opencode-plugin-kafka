@@ -76,6 +76,7 @@ function createMockSDKClient(overrides?: {
   promptSession?: () => Promise<AssistantMessage>;
   abortSession?: () => Promise<boolean>;
   deleteSession?: () => Promise<boolean>;
+  getSession?: () => Promise<{ data?: { id: string } | null } | null>;
 }): SDKClient {
   return {
     session: {
@@ -86,6 +87,7 @@ function createMockSDKClient(overrides?: {
       ),
       abort: overrides?.abortSession ?? vi.fn().mockResolvedValue(true),
       delete: overrides?.deleteSession ?? vi.fn().mockResolvedValue(true),
+      get: overrides?.getSession ?? vi.fn().mockResolvedValue({ data: { id: 'session-123' } }),
     },
   };
 }
@@ -246,12 +248,70 @@ describe('OpenCodeAgentAdapter', () => {
     expect(result).toBe(false);
   });
 
+  // ========================================================================
+  // spec-010: Multi-turn session resume
+  // ========================================================================
+
+  it('должен resume существующую сессию когда existingSessionId передан и session.get находит её', async () => {
+    const mockClient = createMockSDKClient({
+      getSession: () => Promise.resolve({ data: { id: 'ses_existing' } }),
+    });
+
+    const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
+    const result = await adapter.invoke('test prompt', 'test-agent', {
+      timeoutMs: 5000,
+      existingSessionId: 'ses_existing',
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.sessionId).toBe('ses_existing');
+    // session.create() NOT called — we resumed existing
+    expect(mockClient.session.create).not.toHaveBeenCalled();
+    // session.prompt() called with existing sessionId in path
+    const promptCalls = (mockClient.session.prompt as ReturnType<typeof vi.fn>).mock.calls;
+    expect(promptCalls.length).toBeGreaterThan(0);
+    const promptArg = promptCalls[0][0] as { path: { id: string } };
+    expect(promptArg.path.id).toBe('ses_existing');
+  });
+
+  it('должен создать новую сессию когда existingSessionId передан но session.get возвращает null', async () => {
+    const mockClient = createMockSDKClient({
+      getSession: () => Promise.resolve(null),
+    });
+
+    const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
+    const result = await adapter.invoke('test prompt', 'test-agent', {
+      timeoutMs: 5000,
+      existingSessionId: 'ses_missing',
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.sessionId).toBe('session-123'); // default mock createSession ID
+    expect(mockClient.session.create).toHaveBeenCalled();
+  });
+
+  it('должен создать новую сессию когда existingSessionId передан но session.get throws', async () => {
+    const mockClient = createMockSDKClient({
+      getSession: () => Promise.reject(new Error('connection refused')),
+    });
+
+    const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
+    const result = await adapter.invoke('test prompt', 'test-agent', {
+      timeoutMs: 5000,
+      existingSessionId: 'ses_unreachable',
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.sessionId).toBe('session-123'); // default mock createSession ID
+    expect(mockClient.session.create).toHaveBeenCalled();
+  });
+
   it('performCleanup не выбрасывает при ошибке cleanup (best-effort)', async () => {
     // Мокаем SDK с медленным prompt и падающим abort
     const errorClient = {
       session: {
         create: vi.fn().mockResolvedValue({ id: 'session-123' }),
-        prompt: vi.fn().mockImplementation(() => new Promise((resolve) => 
+        prompt: vi.fn().mockImplementation(() => new Promise((resolve) =>
           setTimeout(() => resolve({ role: 'assistant', parts: [{ type: 'text', text: 'response' }] }), 100)
         )),
         abort: vi.fn().mockRejectedValue(new Error('Abort failed')), // abort выбросит ошибку в cleanup
@@ -260,7 +320,7 @@ describe('OpenCodeAgentAdapter', () => {
     };
 
     const adapter = new OpenCodeAgentAdapter(errorClient, 'polling');
-    
+
     // Timeout вызовет performCleanup с TimeoutError
     // abort выбросит ошибку, но она будет поймана в catch block (line 167)
     const result = await adapter.invoke('test', 'agent', { timeoutMs: 50 });
@@ -268,23 +328,11 @@ describe('OpenCodeAgentAdapter', () => {
     // Должен вернуть timeout и НЕ выбросить исключение (cleanup errors ignored)
     expect(result.status).toBe('timeout');
   });
-
-  it('extractResponseText экспортируемая pure function', () => {
-    expect(typeof extractResponseText).toBe('function');
-
-    const parts: Array<{ type: string; text?: string }> = [
-      { type: 'text', text: 'Hello' },
-      { type: 'text', text: 'World' },
-    ];
-
-    const result = extractResponseText(parts);
-    expect(result).toBe('Hello\n\nWorld');
-  });
 });
-
 describe('extractResponseText standalone', () => {
   it('экспортируется и работает как standalone функция', async () => {
-    const { extractResponseText } = await import('../../../src/opencode/utils.js');
+    const { extractResponseText: ert } = await import('../../../src/opencode/utils.js');
+    expect(typeof ert).toBe('function');
 
     const parts: Array<{ type: string; text?: string }> = [
       { type: 'text', text: 'Line 1' },
@@ -292,7 +340,8 @@ describe('extractResponseText standalone', () => {
       { type: 'text', text: 'Line 3' },
     ];
 
-    const result = extractResponseText(parts);
+    const result = ert(parts);
     expect(result).toBe('Line 1\n\nLine 2\n\nLine 3');
   });
 });
+
