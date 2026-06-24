@@ -1,0 +1,60 @@
+version: "3.8"
+
+services:
+  kafka:
+    image: docker.io/apache/kafka:3.8.0
+    container_name: opencode-kafka
+    hostname: kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+      - "9095:9095"
+    environment:
+      # KRaft mode (Kraft)
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CLUSTER_ID: 'AhkKNgV-QE2hZFdDIk9L2A'
+      # Listeners - PLAINTEXT on 9092, PLAINTEXT on 9093, SSL_EXTERNAL on 9095
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT,PLAINTEXT_EXTERNAL:PLAINTEXT,SSL_EXTERNAL:SSL
+      KAFKA_LISTENERS: PLAINTEXT_INTERNAL://:9092,PLAINTEXT_EXTERNAL://:9093,CONTROLLER://:9094,SSL_EXTERNAL://:9095
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_INTERNAL://localhost:9092,PLAINTEXT_EXTERNAL://localhost:9093,SSL_EXTERNAL://localhost:9095
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      # Controller
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9094
+      KAFKA_CONTROLLER_QUORUM_ELECT_LEADERS: "false"
+      # SSL Configuration - with file paths for mounted volume
+      KAFKA_SSL_KEYSTORE_LOCATION: /etc/kafka/ssl/kafka.keystore.jks
+      KAFKA_SSL_KEYSTORE_PASSWORD: changeit
+      KAFKA_SSL_TRUSTSTORE_LOCATION: /etc/kafka/ssl/kafka.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_PASSWORD: changeit
+      KAFKA_SSL_KEY_PASSWORD: changeit
+      # Topics
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Node ID
+      KAFKA_NODE_ID: 1
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+      - ./kafka-ssl:/etc/kafka/ssl:ro
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list 2>/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 90s
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: opencode-kafka-ui
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: 10.89.3.2:9092
+      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: PLAINTEXT
+
+volumes:
+  kafka-data:
