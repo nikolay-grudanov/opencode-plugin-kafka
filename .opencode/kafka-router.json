@@ -1,0 +1,25 @@
+{
+  "version": "003",
+  "topics": ["opencode.prompts"],
+  "dlqTopic": "opencode.dlq",
+  "rules": [
+    {
+      "name": "default-prompt-rule",
+      "jsonPath": "$",
+      "promptTemplate": "You are a helpful assistant. Process this request and call send_to_kafka_default_prompt_rule with your answer.\n\nRequest: ${$}",
+      "agentId": "e2e-responder",
+      "responseTopic": "opencode.responses",
+      "timeoutMs": 120000,
+      "concurrency": 1,
+      "requireToolCall": true,
+      "fallbackToTextCapture": false,
+      "safetyNetTimeoutMs": 60000,
+      "maxSessionMs": 300000
+    }
+  ],
+  "toggles": {
+    "toolDelivery": true,
+    "eventHook": true,
+    "pollingFallback": false
+  }
+}

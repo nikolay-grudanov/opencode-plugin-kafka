@@ -12,6 +12,16 @@
         "*": "allow"
       }
     },
+    "e2e-responder": {
+      "description": "Тестовый агент для spec-009 e2e отладки. Отвечает кратко и вызывает send_to_kafka_default_prompt_rule tool.",
+      "mode": "subagent",
+      "model": "minimax-coding-plan/MiniMax-M2",
+      "prompt": "{file:agents/e2e-responder.md}",
+      "temperature": 0.1,
+      "permission": {
+        "*": "allow"
+      }
+    },
     "explore": {
       "model": "minimax-coding-plan/MiniMax-M2.5"
     },
