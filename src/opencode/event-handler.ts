@@ -263,7 +263,7 @@ let maxSessionGuardInterval: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Start a periodic check that force-DLQs sessions exceeding their
- * rule's maxSessionMs. Runs every checkIntervalMs (min 5s).
+ * rule's maxSessionMs. Runs every checkIntervalMs (no minimum).
  *
  * Called once at plugin startup. Must be paired with stopMaxSessionGuard
  * during graceful shutdown.
@@ -323,7 +323,7 @@ export function startMaxSessionGuard(
         cleanupSessionWatcher(watcher.sessionId);
       }
     }
-  }, Math.max(checkIntervalMs, 5000));
+  }, checkIntervalMs);
 }
 
 /**
