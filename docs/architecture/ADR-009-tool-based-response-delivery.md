@@ -119,6 +119,8 @@ tool?: { [key: string]: ToolDefinition }
 
 **Пересмотр Constitution Principle IV (No-State Consumer)**: остаётся в силе без изменений. Per-session state (FR-4 spec-009) живёт в closure, не в module scope; живёт ≤ `maxSessionMs` (default 300s); удаляется после `session.idle` или timeout. Это **scoped ephemeral state**, не "stateful consumer". Если в будущем потребуется cross-session state (multi-turn Kafka), это будет **отдельный spec** с явным обоснованием нарушения принципа.
 
+**Plugin-level toggles**: spec-009 вводит три глобальных toggle'а (`toolDelivery`, `eventHook`, `pollingFallback`) на верхнем уровне `kafka-router.json`. Это **не нарушает** Constitution — toggles управляют **внешним поведением плагина**, не его внутренним состоянием. Полная комбинаторная матрица (8 вариантов) описана в US5; ключевое правило: **all-false → отказ на старте** (Constitution III Resiliency).
+
 ## Следствия
 
 ### Положительные

@@ -48,7 +48,33 @@ type SessionWatcher = {
 
 **Concurrency**: Multiple sessions can run in parallel (one per concurrent Kafka partition). Map operations are synchronous (no locking needed for typical consumer concurrency).
 
-### 3. PerTestTopics (test helper)
+### 3. PluginToggles (plugin-level delivery control)
+
+```typescript
+type PluginToggles = {
+  toolDelivery: boolean;        // default true — register send_to_kafka_* tools via Hooks.tool
+  eventHook: boolean;           // default true — subscribe to Hooks.event for session.idle
+  pollingFallback: boolean;     // default false — keep pollForResponse() (spec-008 behavior)
+};
+```
+
+Sits at the top of `kafka-router.json` alongside `topics` and `rules`. Validated by extending `PluginConfigV003Schema` in `src/schemas/index.ts`:
+
+```typescript
+const PluginConfigV003Schema = z.object({
+  topics: z.array(z.string()).min(1).max(5),
+  rules: z.array(RuleV003Schema).min(1),
+  toggles: z.object({
+    toolDelivery: z.boolean().default(true),
+    eventHook: z.boolean().default(true),
+    pollingFallback: z.boolean().default(false),
+  }).default({}),  // entire block optional; nested defaults apply
+});
+```
+
+**Validation at startup (FR-T2)**: if `toolDelivery: false && eventHook: false && pollingFallback: false`, plugin refuses to start (Constitution III Resiliency violation). Error message: `errorMessage: "no delivery mechanism active: all toggles are false; set pollingFallback: true"`.
+
+### 4. PerTestTopics (test helper)
 
 ```typescript
 type PerTestTopics = {

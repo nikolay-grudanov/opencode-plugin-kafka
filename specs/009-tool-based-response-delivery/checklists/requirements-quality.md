@@ -3,6 +3,14 @@
 **Purpose**: Validate quality of requirements in `spec.md`, NOT verify implementation.
 **Spec under review**: `specs/009-tool-based-response-delivery/spec.md`
 
+## Compatibility Analysis
+
+- [ ] Does the spec explicitly state that `matchRuleV003` and `promptTemplate` logic are UNCHANGED?
+- [ ] Does the spec explicitly state that `agentId` flow (from rule to `agent.invoke()`) is UNCHANGED?
+- [ ] Does the spec define plugin-level toggles (`toolDelivery`, `eventHook`, `pollingFallback`) at the top of `kafka-router.json` (not per-rule)?
+- [ ] Does the spec define behavior for **each of the 8 combinations** of toggles?
+- [ ] Does the spec refuse to boot when all three toggles are false (Constitution III)?
+
 ## Completeness
 
 - [ ] Does the spec define behavior for **each rule** with `responseTopic` set (US1)?

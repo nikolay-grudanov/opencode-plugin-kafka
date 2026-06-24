@@ -23,13 +23,17 @@
 ## Phase 2: Schema update
 
 - [ ] T005 Add `requireToolCall`, `fallbackToTextCapture`, `safetyNetTimeoutMs`, `maxSessionMs` to `RuleV003Schema` in `src/schemas/index.ts` (FR-6)
+- [ ] T005a Add `toggles: { toolDelivery, eventHook, pollingFallback }` block to `PluginConfigV003Schema` in `src/schemas/index.ts` (FR-T1)
+- [ ] T005b Implement startup validation that refuses to boot when all three toggles are false (FR-T2)
 - [ ] T006 Add `toolCallObserved`, `fallbackUsed`, `sessionDurationMs` optional fields to `DlqEnvelope` type in `src/kafka/dlq.ts` (data-model §3)
 - [ ] T007 Fix bug #3 — change `src/kafka/dlq.ts:106` from `process.env.KAFKA_DLQ_TOPIC || \`${topic}-dlq\`` to take `dlqTopic` as parameter from caller; update `eachMessageHandler` signature in `src/kafka/consumer.ts` to pass `config.dlqTopic`
 
-## Phase 3: Remove polling (US1, US2)
+## Phase 3: Remove polling (US1, US2) — gated by `pollingFallback` toggle
 
-- [ ] T008 Refactor `OpenCodeAgentAdapter.invoke()` in `src/opencode/OpenCodeAgentAdapter.ts` — remove `pollForResponse()`, `MAX_POLL_ATTEMPTS`, `POLL_INTERVAL_MS`; `invoke()` becomes thin shim that creates session, registers watcher, calls `session.prompt()`, returns immediately (FR-7)
-- [ ] T009 Update `src/index.ts` to return `Hooks = { tool: { send_to_kafka_<rule>: createSendToKafkaTool(...) }, event: handleSessionEvent, 'session.error': handleSessionError }` (US3)
+- [ ] T008 Refactor `OpenCodeAgentAdapter.invoke()` in `src/opencode/OpenCodeAgentAdapter.ts` to support two modes per FR-7:
+  - When `toggles.pollingFallback === false` (default): remove `pollForResponse()`, `MAX_POLL_ATTEMPTS`, `POLL_INTERVAL_MS`. `invoke()` becomes thin shim that creates session, registers watcher, calls `session.prompt()`, returns immediately.
+  - When `toggles.pollingFallback === true`: keep `pollForResponse()`, blocking behavior preserved.
+- [ ] T009 Update `src/index.ts` to return `Hooks = { tool: { send_to_kafka_<rule>: createSendToKafkaTool(...) }, event: handleSessionEvent, 'session.error': handleSessionError }` when `toggles.toolDelivery: true` AND `toggles.eventHook: true`. Skip corresponding Hooks fields when toggles are off (US3, FR-T1).
 
 ## Phase 4: Event hook + safety net (US2)
 
@@ -45,10 +49,11 @@
 ## Phase 6: Tests (mandatory, Constitution V)
 
 - [ ] T015 [P] Unit test `src/opencode/tool-handler.test.ts` — covers all 5 args combinations, empty-response rejection, Kafka publish failure path (NFR-5: ≥90% coverage)
+- [ ] T015a [P] Unit test `src/schemas/toggles.test.ts` — covers all 8 combinations of `toolDelivery` × `eventHook` × `pollingFallback`, plus the all-false rejection case (US5)
 - [ ] T016 [P] Unit test `src/opencode/event-handler.test.ts` — covers session.idle with/without tool called, message.part.updated text capture, maxSessionMs timeout
 - [ ] T017 [P] Unit test `src/opencode/session-watchers.test.ts` — covers register/markToolCalled/cleanup, map size stays bounded
-- [ ] T018 [P] Update `tests/unit/opencode/adapter.test.ts` — remove polling-related tests; update mock for `invoke()` to return immediately without waiting for LLM stream
-- [ ] T019 Update `tests/unit/index.test.ts` — plugin returns `Hooks` with `tool`, `event`, `'session.error'`; verify schema
+- [ ] T018 [P] Update `tests/unit/opencode/adapter.test.ts` — remove polling-related tests; update mock for `invoke()` to return immediately without waiting for LLM stream. **Skip when `pollingFallback: true`** (covered by spec-008 tests).
+- [ ] T019 Update `tests/unit/index.test.ts` — plugin returns `Hooks` with `tool`, `event`, `'session.error'` for each toggle combination; verify schema
 - [ ] T020 Update `tests/unit/client.test.ts` if any change to createKafkaClient signature (depends on T007)
 
 ## Phase 7: E2E tests (real OpenCode + real Kafka)
@@ -57,6 +62,7 @@
 - [ ] T022 Add `T-E2E-009: tool-based response` test — produce message, observe LLM calling send_to_kafka tool exactly once, assert response topic has the LLM's final text
 - [ ] T023 Add `T-E2E-010: safety net on missing tool call` test — configure agent with system prompt that forbids tool calls, observe DLQ envelope with `errorMessage: "session idle without tool call"`
 - [ ] T024 Add `T-E2E-011: fallbackToTextCapture` test — opt-in fallback mode, observe response topic has captured text with `fallbackUsed: true`
+- [ ] T024a Add `T-E2E-012: plugin-level toggles` test — verify all 8 combinations of toggles produce correct Hooks shape; verify all-false is rejected at startup
 
 ## Phase 8: Polish
 

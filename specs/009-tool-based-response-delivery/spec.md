@@ -17,6 +17,26 @@ Spec-008 introduced `pollForResponse()` (in `OpenCodeAgentAdapter.ts`) to work a
 
 This spec adopts the official OpenCode plugin API and replaces polling with a tool-based response delivery model. It is a **non-breaking, additive change**: the external Kafka contract (input topic → response topic / DLQ) is preserved. Internal mechanics change.
 
+## Compatibility Analysis with Existing Routing Logic
+
+This spec MUST NOT change the existing input filtering or agent selection behavior. Specifically:
+
+**Input filter (`jsonPath`) — UNCHANGED.** `matchRuleV003(payload, rules)` in `src/core/routing.ts` is a pure function that filters Kafka messages by JSONPath. This is what makes "сообщение из определенных полей" work — the rule's `jsonPath` matches specific fields of the Kafka payload. Spec-009 does not modify routing.ts, prompt.ts, or matchRuleV003 in any way. The same rule's `jsonPath` continues to select which messages trigger the agent.
+
+**Agent selection (`agentId`) — UNCHANGED.** Each rule has `agentId` which identifies which OpenCode agent to invoke. Spec-009 keeps `agentId` as the source of truth for agent selection. The flow is identical:
+
+1. Kafka message arrives → parsed → `matchRuleV003(payload, rules)` returns `matchedRule` (same as today)
+2. `matchedRule.agentId` is passed to `agent.invoke(prompt, matchedRule.agentId, options)` (same call signature)
+3. OpenCode SDK creates session for that agent and runs the LLM (same internal behavior)
+
+**What changes is only the response delivery mechanism:**
+
+- Old (spec-008): poll `session.messages()` for up to 30s, publish to responseTopic, return response in `agentResult.response`
+- New (spec-009, default): register a tool that the LLM calls; tool publishes to responseTopic asynchronously; `agentResult.response` is empty
+- Fallback (when `pollingFallback: true`): same as old behavior
+
+**Backward compatibility for routing config:** existing `kafka-router.json` files with rules like `{"jsonPath": "$.task", "agentId": "e2e-responder"}` continue to work without any change. The new plugin-level toggles (`toolDelivery`, `eventHook`, `pollingFallback`) have defaults that match the recommended spec-009 behavior; the new per-rule fields (`requireToolCall`, `fallbackToTextCapture`, etc.) also have safe defaults.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Agent-Initiated Response Delivery via Custom Tool (Priority: P1) 🎯 MVP
@@ -61,6 +81,23 @@ As a developer installing the plugin, I want the plugin to register the `send_to
 2. **Given** a rule with `responseTopic: null`, **When** the plugin loads, **Then** no tool is registered for that rule (other rules still get their tools).
 3. **Given** the agent calls one of the registered tools, **When** the tool's `execute()` runs, **Then** `ctx.sessionID` (passed by OpenCode) matches the session that was created by the plugin for the Kafka message, allowing correlation of request → response.
 
+### User Story 5 — Plugin-Level Delivery Mechanism Toggles (Priority: P2)
+
+As a plugin operator deploying to different environments (some with OpenCode ≥ 1.16 supporting `Hooks.tool`, some with older versions; some wanting strict safety nets, some accepting silent loss), I want three plugin-level toggles in `kafka-router.json` to control which delivery mechanisms are active. Toggles are independent: each can be on or off without affecting the others.
+
+**Why this priority**: Without toggles, every user is forced into one deployment model. Operators with strict compliance needs may need to disable tool delivery; operators with older OpenCode may need polling fallback. Toggles make spec-009 deployable in heterogeneous environments.
+
+**Independent Test**: Configure `kafka-router.json` with each combination of `toolDelivery` / `eventHook` / `pollingFallback` and verify that only the active mechanisms are registered. Test all 8 combinations (2^3) in unit tests.
+
+**Acceptance Scenarios**:
+
+1. **Given** `toolDelivery: true, eventHook: true, pollingFallback: false` (default), **When** the plugin loads, **Then** `Hooks.tool` contains N tools (one per rule with responseTopic), `Hooks.event` is subscribed, polling is disabled.
+2. **Given** `toolDelivery: false, eventHook: false, pollingFallback: true`, **When** the plugin loads, **Then** no tools are registered, no event subscription, `OpenCodeAgentAdapter.invoke()` polls for response (spec-008 behavior).
+3. **Given** `toolDelivery: true, eventHook: false, pollingFallback: false`, **When** the plugin loads, **Then** tools are registered but no safety net — messages without tool calls are silently lost (only the offset is committed). Plugin logs a startup warning.
+4. **Given** `toolDelivery: false, eventHook: true, pollingFallback: false`, **When** the plugin loads, **Then** no tools are registered but event hook still subscribes — every session.idle event triggers DLQ because no tool was ever called. Plugin logs a startup warning.
+5. **Given** `toolDelivery: false, eventHook: false, pollingFallback: false`, **When** the plugin loads, **Then** no delivery mechanism is active — every Kafka message goes to DLQ. Plugin logs a critical startup warning and refuses to start unless `pollingFallback: true` is set (Constitution III Resiliency violation otherwise).
+6. **Given** toggles are omitted from `kafka-router.json`, **When** the plugin loads, **Then** defaults apply (`toolDelivery: true, eventHook: true, pollingFallback: false`) — same as spec-009 recommended behavior.
+
 ### User Story 4 — Per-Test DLQ Topics for E2E Isolation (Priority: P2)
 
 As a test author, I want each e2e test to have its own DLQ topic so that `consumeOneMessage()` cannot accidentally catch an envelope from a previous test (the root cause of T-E2E-007 and T-E2E-008 failures on 2026-06-24).
@@ -84,15 +121,30 @@ As a test author, I want each e2e test to have its own DLQ topic so that `consum
 
 ## Requirements *(mandatory)*
 
+### Plugin-Level Toggles (NFR-3 back-compat, NEW in spec-009)
+
+These are **plugin-level** switches at the top of `kafka-router.json` (sibling of `topics` and `rules`). They control which delivery mechanism the plugin uses globally; per-rule behavior is unchanged.
+
+- **FR-T1**: Plugin config MUST accept three optional top-level boolean fields:
+  - `toolDelivery: boolean` (default `true`) — when `true`, plugin registers `send_to_kafka_<rule>` tools via `Hooks.tool` for each rule with `responseTopic`. When `false`, plugin does NOT register any tools.
+  - `eventHook: boolean` (default `true`) — when `true`, plugin subscribes to `Hooks.event` for `session.idle` and `message.part.updated`. When `false`, plugin does NOT subscribe (no safety net, no fallback).
+  - `pollingFallback: boolean` (default `false`) — when `true`, plugin keeps `pollForResponse()` active and uses it instead of (or alongside) tool delivery. This is the spec-008 behavior; enables graceful rollback if `Hooks.tool` is unavailable in the OpenCode version.
+- **FR-T2**: When `toolDelivery: false` AND `pollingFallback: false`, plugin MUST log a clear warning at startup that no response delivery mechanism is active and DLQ will receive every message; recommend setting `pollingFallback: true`.
+- **FR-T3**: When `toolDelivery: true` AND `pollingFallback: true`, plugin uses tool as primary (event-driven, fast) and polling as fallback only if the tool call did not fire within `safetyNetTimeoutMs`/2. This is the recommended "best of both worlds" mode.
+- **FR-T4**: `eventHook: false` disables safety net — DLQ never receives "session idle without tool call" envelopes. Use only when `pollingFallback: true` or when intentionally accepting silent loss.
+
 ### Functional Requirements
 
-- **FR-1**: Plugin MUST register one custom tool per rule with non-null `responseTopic`. Tool name MUST be `send_to_kafka_<sanitized_rule_name>` where `<sanitized_rule_name>` is the rule name with non-alphanumeric chars replaced by `_`.
+- **FR-1**: Plugin MUST register one custom tool per rule with non-null `responseTopic` **when `toolDelivery: true` (plugin-level toggle, FR-T1)**. Tool name MUST be `send_to_kafka_<sanitized_rule_name>` where `<sanitized_rule_name>` is the rule name with non-alphanumeric chars replaced by `_`.
 - **FR-2**: Tool args schema MUST be a Zod object with three fields: `responseTopic` (string, optional if rule has exactly one responseTopic — auto-filled), `response` (string, the answer), `sessionId` (string, optional — auto-filled from `ctx.sessionID` if omitted).
 - **FR-3**: Tool `execute(args, ctx)` MUST publish `{sessionId, ruleName, agentId, response, status: "success", executionTimeMs, timestamp}` to `args.responseTopic` via the existing `sendResponse()` producer. Tool MUST return `{output: "published to <topic>"}` on success.
-- **FR-4**: Plugin MUST subscribe to the global `event` hook and filter for `type: "session.idle"`. For each idle session where the rule requires a tool call (`requireToolCall: true` default), if no `send_to_kafka_*` tool was called for that session, plugin MUST send a DLQ envelope.
-- **FR-5**: Plugin MUST also subscribe to `event.message.part.updated` filtered for `part.type === "text"` and `part.sessionID` matches a session the plugin created. This is used by the optional `fallbackToTextCapture` mode (US2).
+- **FR-4**: Plugin MUST subscribe to the global `event` hook and filter for `type: "session.idle"` **when `eventHook: true` (plugin-level toggle, FR-T1)**. For each idle session where the rule requires a tool call (`requireToolCall: true` default), if no `send_to_kafka_*` tool was called for that session, plugin MUST send a DLQ envelope.
+- **FR-5**: Plugin MUST also subscribe to `event.message.part.updated` filtered for `part.type === "text"` and `part.sessionID` matches a session the plugin created. This is used by the optional `fallbackToTextCapture` mode (US2). **Both this and FR-4 are gated by `eventHook: true`**.
 - **FR-6**: Plugin MUST expose new rule config fields in `kafka-router.json` schema: `requireToolCall` (boolean, default `true`), `fallbackToTextCapture` (boolean, default `false`), `safetyNetTimeoutMs` (number, default `60000`), `maxSessionMs` (number, default `300000`).
-- **FR-7**: Plugin MUST remove `pollForResponse()` and the `MAX_POLL_ATTEMPTS`/`POLL_INTERVAL_MS` constants from `OpenCodeAgentAdapter.ts`. The adapter's `invoke()` becomes a thin shim that creates the session, builds the prompt with the tool-aware system prefix, calls `session.prompt()`, and returns immediately (the tool fires the actual publish asynchronously).
+- **FR-7**: `OpenCodeAgentAdapter.invoke()` MUST support two modes based on `pollingFallback` toggle (FR-T1):
+  - `pollingFallback: false` (default in spec-009): adapter removes `pollForResponse()`, `MAX_POLL_ATTEMPTS`, `POLL_INTERVAL_MS`. `invoke()` becomes thin shim that creates session, registers watcher, calls `session.prompt()`, returns immediately — actual response arrives via tool + event hook.
+  - `pollingFallback: true` (spec-008 behavior): adapter keeps `pollForResponse()`. `invoke()` blocks for up to 30s waiting for assistant message, returns response synchronously. Tool registration is **skipped** to avoid double-publish.
+  - **Plugin-level decision only**: do NOT add per-rule `pollingFallback` — keeping it plugin-wide simplifies the safety net logic and prevents inconsistency where one rule uses tool and another uses polling.
 - **FR-8**: E2E test harness MUST use per-test DLQ topics. A new helper `tests/e2e/helpers/perTestTopics.ts` exposes `createPerTestTopics(testName)` that creates uniquely-named input/response/dlq topics and returns their names for the test to use.
 - **FR-9**: Plugin MUST keep `session.error` observability hook (already implemented in commit `fcae64e`) — this is independent of the tool migration.
 - **FR-10**: Plugin MUST NOT introduce new long-lived state. Per-session state (e.g. "did this session already call the tool?") MUST live inside the `session.idle` handler closure for the duration of one session and be discarded after offset commit.
