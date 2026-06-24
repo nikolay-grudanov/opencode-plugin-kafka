@@ -39,6 +39,17 @@ vi.mock('../../src/kafka/client.js', () => ({
     send: vi.fn(),
     disconnect: vi.fn(),
   }),
+  createDlqProducer: vi.fn().mockReturnValue({
+    connect: vi.fn(),
+    send: vi.fn(),
+    disconnect: vi.fn(),
+  }),
+}));
+
+vi.mock('../../src/opencode/event-handler.js', () => ({
+  createEventHandler: vi.fn().mockReturnValue(vi.fn()),
+  startMaxSessionGuard: vi.fn(),
+  stopMaxSessionGuard: vi.fn(),
 }));
 
 // Импортируем после моков

@@ -4,8 +4,8 @@
  * Plugin entry point for OpenCode Kafka Router plugin.
  * Implements FR-025 from spec 003-kafka-consumer.
  *
- * spec-009: now also wires up tool-based response delivery via
- * @opencode-ai/plugin Hooks.tool. See ADR-009-tool-based-response-delivery.md.
+ * spec-009: now wires up tool-based response delivery via
+ * @opencode-ai/plugin Hooks.tool + Hooks.event. See ADR-009.
  *
  * @see https://opencode.ai/docs/plugins/
  * @see spec/003-kafka-consumer/spec.md § FR-025
@@ -16,16 +16,16 @@ import type { PluginContext, PluginHooks } from './types/opencode-plugin.d.ts';
 import type { Producer } from 'kafkajs';
 import { parseConfigV003 } from './core/config.js';
 import { startConsumer } from './kafka/consumer.js';
-import { createKafkaClient, createResponseProducer } from './kafka/client.js';
+import { createKafkaClient, createResponseProducer, createDlqProducer } from './kafka/client.js';
 import { OpenCodeAgentAdapter } from './opencode/OpenCodeAgentAdapter.js';
 import { buildAllTools } from './opencode/tool-handler.js';
+import { createEventHandler, startMaxSessionGuard } from './opencode/event-handler.js';
 
 /**
  * OpenCode SDK session error handler (ADR-005, spec-006 FR-001, T020).
  *
  * Pure observability hook: logs internal OpenCode runtime errors. Does NOT
- * influence Kafka message processing — all Kafka errors flow through DLQ
- * (see kafka/dlq.ts).
+ * influence Kafka message processing — all Kafka errors flow through DLQ.
  */
 function handleSessionError(error: Error, sessionId: string): void {
   console.error(
@@ -45,42 +45,35 @@ function handleSessionError(error: Error, sessionId: string): void {
  *
  * spec-009 tool-based delivery flow:
  *   1. Parse kafka-router.json (validates Zod schema + FR-017 + toggles)
- *   2. Create Kafka client + shared response producer (used by both
- *      startConsumer and tool-handler)
+ *   2. Create Kafka client + shared producers (response + DLQ)
  *   3. Build Hooks.tool map (if toggles.toolDelivery)
- *   4. Create adapter with mode matching toggles.pollingFallback
- *   5. Return Hooks with tool + 'session.error'
- *   6. startConsumer runs in background, processes Kafka messages
- *
- * @param context - Контекст плагина OpenCode (client, project, directory)
- * @returns Plugin hooks object with tool and session.error
+ *   4. Build Hooks.event handler (if toggles.eventHook) + start max-session guard
+ *   5. Create adapter with mode matching toggles.pollingFallback
+ *   6. Return Hooks with tool + event + 'session.error'
+ *   7. startConsumer runs in background, processes Kafka messages
  */
 export default async function plugin(context: PluginContext): Promise<PluginHooks> {
   try {
-    // 1. Парсим конфигурацию из kafka-router.json (spec 003)
+    // 1. Парсим конфигурацию из kafka-router.json
     const config = parseConfigV003();
 
-    // 2. Создаём Kafka client + response producer (shared между consumer
-    //    и tool-handler; оба будут слать в Kafka через этот инстанс).
+    // 2. Создаём Kafka client + shared producers
     const { kafka } = createKafkaClient(process.env);
     const responseProducer: Producer = createResponseProducer(kafka);
+    const dlqProducer: Producer = createDlqProducer(kafka);
 
-    // 3. Создаём адаптер для OpenCode агентов из SDK клиента.
-    //    Mode берётся из toggles.pollingFallback (FR-T1):
-    //      pollingFallback=true  → legacy blocking mode (spec-008)
-    //      pollingFallback=false → tool-based async mode (spec-009 default)
-    //    Defensive: tolerate config without toggles (defaults applied).
+    // Defensive defaults (back-compat with configs lacking toggles block)
     const toggles = config.toggles ?? {
       toolDelivery: true,
       eventHook: true,
       pollingFallback: false,
     };
+
+    // 3. Создаём адаптер с правильным mode
     const adapterMode = toggles.pollingFallback ? 'polling' : 'tool-based';
     const agent = new OpenCodeAgentAdapter(context.client, adapterMode);
 
-    // 4. Запускаем Kafka consumer в фоне. startConsumer блокирует до
-    //    shutdown, поэтому НЕ await — иначе plugin() никогда не вернёт
-    //    Hooks. Ошибки запуска логируются через .catch.
+    // 4. Запускаем Kafka consumer в фоне
     startConsumer(config, agent).catch((error) => {
       console.error(
         JSON.stringify({
@@ -92,17 +85,14 @@ export default async function plugin(context: PluginContext): Promise<PluginHook
       );
     });
 
-    // 5. Строим Hooks объект согласно toggles (FR-T1).
+    // 5. Строим Hooks объект согласно toggles (FR-T1)
     const hooks: Record<string, unknown> = {
       'session.error': handleSessionError,
     };
 
     if (toggles.toolDelivery) {
-      // Register one send_to_kafka_<rule> tool per rule with responseTopic.
-      // The tool handler publishes via the shared responseProducer.
       const tools = buildAllTools(config.rules, { producer: responseProducer });
       hooks.tool = tools;
-
       console.log(
         JSON.stringify({
           level: 'info',
@@ -123,7 +113,16 @@ export default async function plugin(context: PluginContext): Promise<PluginHook
       );
     }
 
-    if (!toggles.eventHook) {
+    if (toggles.eventHook) {
+      // Register event handler: session.idle → safety net (DLQ or fallback)
+      hooks.event = createEventHandler({
+        responseProducer,
+        dlqProducer,
+        config,
+      });
+      // Start maxSessionMs wall-clock guard (periodic check)
+      startMaxSessionGuard({ responseProducer, dlqProducer, config });
+    } else {
       console.warn(
         JSON.stringify({
           level: 'warn',
@@ -138,9 +137,8 @@ export default async function plugin(context: PluginContext): Promise<PluginHook
 
     return hooks as unknown as PluginHooks;
   } catch (error) {
-    // Логируем ошибку для fail-fast поведения
+    // Fail-fast: log and rethrow so OpenCode surfaces the error
     const errorMessage = error instanceof Error ? error.message : String(error);
-
     console.error(
       JSON.stringify({
         level: 'error',
@@ -149,7 +147,6 @@ export default async function plugin(context: PluginContext): Promise<PluginHook
         timestamp: new Date().toISOString(),
       })
     );
-
     throw error;
   }
 }
