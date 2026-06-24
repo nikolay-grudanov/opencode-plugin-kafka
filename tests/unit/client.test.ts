@@ -4,7 +4,7 @@
  * @fileoverview Tests for createKafkaClient, createConsumer, createDlqProducer functions
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createKafkaClient, createConsumer, createDlqProducer, createResponseProducer } from '../../src/kafka/client.js';
 
 describe('createKafkaClient', () => {
@@ -21,12 +21,12 @@ describe('createKafkaClient', () => {
   });
 
   describe('Valid environment creates Kafka client', () => {
-    it('должен создать Kafka клиент для корректных переменных окружения', () => {
+    it('должен создать Kafka клиент для корректных переменных окружения', async () => {
       process.env.KAFKA_BROKERS = 'localhost:9092';
       process.env.KAFKA_CLIENT_ID = 'test-client';
       process.env.KAFKA_GROUP_ID = 'test-group';
 
-      const { kafka, validatedEnv } = createKafkaClient(process.env);
+      const { kafka, validatedEnv } = await createKafkaClient(process.env);
 
       expect(kafka).toBeDefined();
       expect(kafka).toHaveProperty('consumer');
@@ -36,43 +36,43 @@ describe('createKafkaClient', () => {
   });
 
   describe('Missing KAFKA_BROKERS throws descriptive error', () => {
-    it('должен выбросить Error с упоминанием KAFKA_BROKERS при отсутствии переменной', () => {
+    it('должен выбросить Error с упоминанием KAFKA_BROKERS при отсутствии переменной', async () => {
       process.env.KAFKA_CLIENT_ID = 'test-client';
       process.env.KAFKA_GROUP_ID = 'test-group';
       // KAFKA_BROKERS не установлен
 
-      expect(() => createKafkaClient(process.env)).toThrow('KAFKA_BROKERS');
+      await expect(createKafkaClient(process.env)).rejects.toThrow('KAFKA_BROKERS');
     });
   });
 
   describe('Missing KAFKA_CLIENT_ID throws descriptive error', () => {
-    it('должен выбросить Error с упоминанием KAFKA_CLIENT_ID при отсутствии переменной', () => {
+    it('должен выбросить Error с упоминанием KAFKA_CLIENT_ID при отсутствии переменной', async () => {
       process.env.KAFKA_BROKERS = 'localhost:9092';
       process.env.KAFKA_GROUP_ID = 'test-group';
       // KAFKA_CLIENT_ID не установлен
 
-      expect(() => createKafkaClient(process.env)).toThrow('KAFKA_CLIENT_ID');
+      await expect(createKafkaClient(process.env)).rejects.toThrow('KAFKA_CLIENT_ID');
     });
   });
 
   describe('Missing KAFKA_GROUP_ID throws descriptive error', () => {
-    it('должен выбросить Error с упоминанием KAFKA_GROUP_ID при отсутствии переменной', () => {
+    it('должен выбросить Error с упоминанием KAFKA_GROUP_ID при отсутствии переменной', async () => {
       process.env.KAFKA_BROKERS = 'localhost:9092';
       process.env.KAFKA_CLIENT_ID = 'test-client';
       // KAFKA_GROUP_ID не установлен
 
-      expect(() => createKafkaClient(process.env)).toThrow('KAFKA_GROUP_ID');
+      await expect(createKafkaClient(process.env)).rejects.toThrow('KAFKA_GROUP_ID');
     });
   });
 
   describe('SSL enabled when KAFKA_SSL=true', () => {
-    it('должен включить SSL когда KAFKA_SSL=true', () => {
+    it('должен включить SSL когда KAFKA_SSL=true', async () => {
       process.env.KAFKA_BROKERS = 'localhost:9092';
       process.env.KAFKA_CLIENT_ID = 'test-client';
       process.env.KAFKA_GROUP_ID = 'test-group';
       process.env.KAFKA_SSL = 'true';
 
-      const { kafka, validatedEnv } = createKafkaClient(process.env);
+      const { kafka, validatedEnv } = await createKafkaClient(process.env);
 
       expect(kafka).toBeDefined();
       expect(validatedEnv.KAFKA_SSL).toBe(true);
@@ -82,46 +82,81 @@ describe('createKafkaClient', () => {
   });
 
   describe('SSL disabled when KAFKA_SSL=false', () => {
-    it('должен отключить SSL когда KAFKA_SSL=false', () => {
+    it('должен отключить SSL когда KAFKA_SSL=false', async () => {
       process.env.KAFKA_BROKERS = 'localhost:9092';
       process.env.KAFKA_CLIENT_ID = 'test-client';
       process.env.KAFKA_GROUP_ID = 'test-group';
       process.env.KAFKA_SSL = 'false';
 
-      const { validatedEnv } = createKafkaClient(process.env);
+      const { validatedEnv } = await createKafkaClient(process.env);
 
       expect(validatedEnv.KAFKA_SSL).toBe(false);
     });
   });
 
   describe('KAFKA_SSL not set returns false', () => {
-    it('должен вернуть false когда KAFKA_SSL не установлен', () => {
+    it('должен вернуть false когда KAFKA_SSL не установлен', async () => {
       process.env.KAFKA_BROKERS = 'localhost:9092';
       process.env.KAFKA_CLIENT_ID = 'test-client';
       process.env.KAFKA_GROUP_ID = 'test-group';
 
-      const { validatedEnv } = createKafkaClient(process.env);
+      const { validatedEnv } = await createKafkaClient(process.env);
 
       expect(validatedEnv.KAFKA_SSL).toBe(false);
     });
   });
 
+  describe('SSL with PEM certificates', () => {
+    it('должен читать KAFKA_SSL_CA из environment', async () => {
+      process.env.KAFKA_BROKERS = 'localhost:9092';
+      process.env.KAFKA_CLIENT_ID = 'test-client';
+      process.env.KAFKA_GROUP_ID = 'test-group';
+      process.env.KAFKA_SSL_CA = './kafka-ssl/ca.pem';
+
+      const { validatedEnv } = await createKafkaClient(process.env);
+
+      expect(validatedEnv.KAFKA_SSL_CA).toBe('./kafka-ssl/ca.pem');
+    });
+
+    it('должен читать KAFKA_SSL_CERT из environment', async () => {
+      process.env.KAFKA_BROKERS = 'localhost:9092';
+      process.env.KAFKA_CLIENT_ID = 'test-client';
+      process.env.KAFKA_GROUP_ID = 'test-group';
+      process.env.KAFKA_SSL_CERT = './kafka-ssl/client.pem';
+
+      const { validatedEnv } = await createKafkaClient(process.env);
+
+      expect(validatedEnv.KAFKA_SSL_CERT).toBe('./kafka-ssl/client.pem');
+    });
+
+    it('должен читать KAFKA_SSL_KEY из environment', async () => {
+      process.env.KAFKA_BROKERS = 'localhost:9092';
+      process.env.KAFKA_CLIENT_ID = 'test-client';
+      process.env.KAFKA_GROUP_ID = 'test-group';
+      process.env.KAFKA_SSL_KEY = './kafka-ssl/client-key.pem';
+
+      const { validatedEnv } = await createKafkaClient(process.env);
+
+      expect(validatedEnv.KAFKA_SSL_KEY).toBe('./kafka-ssl/client-key.pem');
+    });
+  });
+
   describe('SASL configured when username+password set', () => {
-    it('должен сконфигурировать SASL когда установлены KAFKA_USERNAME и KAFKA_PASSWORD', () => {
+    it('должен сконфигурировать SASL когда установлены KAFKA_USERNAME и KAFKA_PASSWORD', async () => {
       process.env.KAFKA_BROKERS = 'localhost:9092';
       process.env.KAFKA_CLIENT_ID = 'test-client';
       process.env.KAFKA_GROUP_ID = 'test-group';
       process.env.KAFKA_USERNAME = 'user';
       process.env.KAFKA_PASSWORD = 'pass';
 
-      const { kafka, validatedEnv } = createKafkaClient(process.env);
+      const { kafka, validatedEnv } = await createKafkaClient(process.env);
 
       expect(kafka).toBeDefined();
       expect(validatedEnv.KAFKA_USERNAME).toBe('user');
       // SASL будет сконфигурирован с механизмом по умолчанию (plain)
     });
 
-    it('должен использовать механизм из KAFKA_SASL_MECHANISM когда установлен', () => {
+    it('должен использовать механизм из KAFKA_SASL_MECHANISM когда установлен', async () => {
       process.env.KAFKA_BROKERS = 'localhost:9092';
       process.env.KAFKA_CLIENT_ID = 'test-client';
       process.env.KAFKA_GROUP_ID = 'test-group';
@@ -129,7 +164,7 @@ describe('createKafkaClient', () => {
       process.env.KAFKA_PASSWORD = 'pass';
       process.env.KAFKA_SASL_MECHANISM = 'scram-sha-256';
 
-      const { kafka, validatedEnv } = createKafkaClient(process.env);
+      const { kafka, validatedEnv } = await createKafkaClient(process.env);
 
       expect(kafka).toBeDefined();
       expect(validatedEnv.KAFKA_SASL_MECHANISM).toBe('scram-sha-256');
@@ -138,12 +173,12 @@ describe('createKafkaClient', () => {
   });
 
   describe('Trims trailing spaces from KAFKA_BROKERS', () => {
-    it('должен передать trimmed brokers в Kafka client', () => {
+    it('должен передать trimmed brokers в Kafka client', async () => {
       process.env.KAFKA_BROKERS = 'localhost:9092 , kafka2:9092 ';
       process.env.KAFKA_CLIENT_ID = 'test-client';
       process.env.KAFKA_GROUP_ID = 'test-group';
 
-      const { kafka } = createKafkaClient(process.env);
+      const { kafka } = await createKafkaClient(process.env);
 
       expect(kafka).toBeDefined();
       // validatedEnv.KAFKA_BROKERS остаётся как в input (без мутации)
@@ -152,7 +187,7 @@ describe('createKafkaClient', () => {
   });
 
   describe('Extra process.env keys are ignored (passthrough)', () => {
-    it('должен игнорировать дополнительные ключи из process.env', () => {
+    it('должен игнорировать дополнительные ключи из process.env', async () => {
       process.env.KAFKA_BROKERS = 'localhost:9092';
       process.env.KAFKA_CLIENT_ID = 'test-client';
       process.env.KAFKA_GROUP_ID = 'test-group';
@@ -160,7 +195,7 @@ describe('createKafkaClient', () => {
       process.env.HOME = '/home/user';
       process.env.USER = 'testuser';
 
-      const { validatedEnv } = createKafkaClient(process.env);
+      const { validatedEnv } = await createKafkaClient(process.env);
 
       // validatedEnv должен содержать только определённые ключи
       expect(validatedEnv.KAFKA_BROKERS).toBe('localhost:9092');
@@ -187,37 +222,37 @@ describe('createConsumer', () => {
   });
 
   describe('Valid Kafka creates consumer with correct settings', () => {
-    it('должен создать consumer с sessionTimeout: 300000', () => {
-      const { kafka, validatedEnv } = createKafkaClient(process.env);
+    it('должен создать consumer с sessionTimeout: 300000', async () => {
+      const { kafka, validatedEnv } = await createKafkaClient(process.env);
       const consumer = createConsumer(kafka, validatedEnv.KAFKA_GROUP_ID);
 
       expect(consumer).toBeDefined();
       // sessionTimeout будет проверен в интеграционных тестах
     });
 
-    it('должен создать consumer с heartbeatInterval: 30000', () => {
-      const { kafka, validatedEnv } = createKafkaClient(process.env);
+    it('должен создать consumer с heartbeatInterval: 30000', async () => {
+      const { kafka, validatedEnv } = await createKafkaClient(process.env);
       const consumer = createConsumer(kafka, validatedEnv.KAFKA_GROUP_ID);
 
       expect(consumer).toBeDefined();
       // heartbeatInterval будет проверен в интеграционных тестах
     });
 
-    it('должен использовать groupId из переданного параметра', () => {
-      const { kafka } = createKafkaClient(process.env);
+    it('должен использовать groupId из переданного параметра', async () => {
+      const { kafka } = await createKafkaClient(process.env);
       const consumer = createConsumer(kafka, 'my-custom-group');
 
       expect(consumer).toBeDefined();
       // groupId будет проверен в интеграционных тестах
     });
 
-    it('должен выбросить ошибку при пустом groupId', () => {
-      const { kafka } = createKafkaClient(process.env);
+    it('должен выбросить ошибку при пустом groupId', async () => {
+      const { kafka } = await createKafkaClient(process.env);
       expect(() => createConsumer(kafka, '')).toThrow('groupId is required');
     });
 
-    it('должен выбросить ошибку при groupId только с пробелами', () => {
-      const { kafka } = createKafkaClient(process.env);
+    it('должен выбросить ошибку при groupId только с пробелами', async () => {
+      const { kafka } = await createKafkaClient(process.env);
       expect(() => createConsumer(kafka, '   ')).toThrow('groupId is required');
     });
   });
@@ -238,8 +273,8 @@ describe('createDlqProducer', () => {
   });
 
   describe('Valid Kafka creates DLQ producer', () => {
-    it('должен создать отдельный producer для DLQ', () => {
-      const { kafka } = createKafkaClient(process.env);
+    it('должен создать отдельный producer для DLQ', async () => {
+      const { kafka } = await createKafkaClient(process.env);
       const producer = createDlqProducer(kafka);
 
       expect(producer).toBeDefined();
@@ -264,7 +299,7 @@ describe('createResponseProducer', () => {
 
   describe('Valid Kafka creates response producer', () => {
     it('должен создать producer для ответов агентов', async () => {
-      const { kafka } = createKafkaClient(process.env);
+      const { kafka } = await createKafkaClient(process.env);
       // Мокаем connect чтобы не пытаться подключиться к реальному Kafka
       const mockProducer = {
         connect: vi.fn().mockResolvedValue(undefined),

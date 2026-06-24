@@ -7,12 +7,23 @@
  * - Promise.race для timeout
  * - best-effort cleanup (abort на timeout, delete на error)
  * - все ошибки оборачиваются в AgentResult
+ *
+ * CRITICAL FIX: session.prompt() returns {data: undefined} because the LLM
+ * response comes via SSE streaming. The adapter must poll session.messages()
+ * to retrieve the actual assistant response.
  */
 
 import type { IOpenCodeAgent, AgentResult, InvokeOptions } from './IOpenCodeAgent.js';
 import type { SDKClient } from '../types/opencode-sdk.js';
 import { TimeoutError, AgentError } from './AgentError.js';
 import { extractResponseText } from './utils.js';
+
+/**
+ * Maximum number of polling attempts for getting the LLM response.
+ * Poll interval: 1 second, total max wait: 30 seconds
+ */
+const MAX_POLL_ATTEMPTS = 30;
+const POLL_INTERVAL_MS = 1000;
 
 /**
  * Адаптер для вызова OpenCode агентов через SDK.
@@ -86,15 +97,18 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
         throw new AgentError('Operation was aborted');
       }
 
-      // 4. Создаём промисы для race: timeout и abort signal
+      // 4. Соз��аём промисы для race: timeout и abort signal
       const { promise: timeoutPromise, clear: cleanupTimeout } =
         this.createTimeoutPromise(timeoutMs);
       const { promise: signalPromise, clear: cleanupSignal } = this.createSignalPromise(
         options.signal
       );
-      let response;
+
+      // 5. Send the prompt via session.prompt()
+      // CRITICAL: session.prompt() returns {data: undefined} because the LLM response
+      // comes via SSE streaming. The prompt is sent but we get no response body.
       try {
-        response = await Promise.race([
+        await Promise.race([
           this.client.session.prompt({
             path: { id: sessionId },
             body: {
@@ -110,12 +124,12 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
         cleanupSignal();
       }
 
-      // 5. Извлекаем текст из ответа
-      // hey-api wrapper возвращает { data: { parts: [...] }, error: null }
-      const parts = response?.data?.parts ?? [];
-      const responseText = extractResponseText(parts);
+      // 6. Poll session.messages() to get the LLM response
+      // The session.prompt() sent the message but the actual response is delivered
+      // via SSE. We need to poll for the assistant's response message.
+      const responseText = await this.pollForResponse(sessionId, options.signal);
 
-      // 6. Успешный результат
+      // 7. Успешный результат
       return {
         status: 'success',
         response: responseText,
@@ -182,6 +196,68 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
   // ========================================================================
   // Приватные методы
   // ========================================================================
+
+  // TODO: вызывающий код ожидает что session.prompt() вернёт ответ,
+  // но реальный SDK возвращает {data: undefined}. Удалить после фикса SDK.
+  /**
+   * Polls session.messages() until the LLM response is received.
+   *
+   * The session.prompt() method sends the prompt but returns immediately
+   * with {data: undefined} because the actual response comes via SSE.
+   * We poll messages to retrieve the assistant's response.
+   *
+   * @param sessionId - ID сессии для polling
+   * @param signal - AbortSignal для отмены
+   * @returns текст ответа от LLM
+   */
+  private async pollForResponse(sessionId: string, signal?: AbortSignal): Promise<string> {
+    let lastMessageCount = 0;
+
+    for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+      // Check for abort signal
+      if (signal?.aborted) {
+        throw new AgentError('Operation was aborted');
+      }
+
+      // Get messages from the session
+      const messagesResult = await this.client.session.messages({
+        path: { id: sessionId },
+      });
+
+      const messages = messagesResult.data ?? [];
+      const currentMessageCount = messages.length;
+
+      // If we have more messages than before, check the latest assistant message
+      if (currentMessageCount > lastMessageCount) {
+        // Find the latest assistant message (the LLM response)
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const msg = messages[i];
+          if (msg.role === 'assistant' && msg.parts && msg.parts.length > 0) {
+            // Found the assistant response
+            const responseText = extractResponseText(msg.parts);
+            if (responseText) {
+              return responseText;
+            }
+          }
+        }
+      }
+
+      lastMessageCount = currentMessageCount;
+
+      // Wait before next poll
+      await this.sleep(POLL_INTERVAL_MS);
+    }
+
+    // Timeout: no assistant response received after max attempts
+    throw new TimeoutError(`No response received after ${MAX_POLL_ATTEMPTS} polling attempts`);
+  }
+
+  /**
+   * Sleep helper for polling delays.
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 
   /**
    * Создаёт Promise который отклоняется через указанное время.

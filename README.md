@@ -1,43 +1,321 @@
-# OpenCode Kafka Router Plugin
+# OpenCode Kafka Plugin — Production Documentation
 
-Плагин для маршрутизации сообщений из Kafka топиков к OpenCode агентам. Реализует интеграцию с OpenCode SDK (spec 006).
+## Overview
 
-## Возможности
+**opencode-plugin-kafka** is a Kafka consumer plugin for OpenCode that consumes messages from Kafka topics, processes them via OpenCode agents, and produces responses back to designated topics.
 
-- **JSONPath маршрутизация** — правила на основе JSONPath выражений для фильтрации сообщений
-- **OpenCode SDK интеграция** — вызов агентов через `agent.invoke()` с поддержкой AbortController
-- **Dead Letter Queue** — автоматическая отправка ошибок в DLQ топик
-- **Response producer** — отправка ответов агентов в отдельный топик
-- **Graceful shutdown** — корректное завершение при SIGTERM/SIGINT с отменой активных сессий
-- **Sequential processing** — гарантированная последовательная обработка сообщений
-- **Structured logging** — JSON логирование для мониторинга
+### Architecture
 
-## Установка
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     KAFKA CLUSTER                               │
+│  ┌─────────────────┐    ┌─────────────────┐                   │
+│  │ opencode.prompts │    │opencode.responses│                  │
+│  │    (INPUT)    │───▶│    (OUTPUT)    │                  │
+│  └─────────────────┘    └─────────────────┘                   │
+│                              ↑                                 │
+│  ┌─────────────────┐           │                                 │
+│  │  opencode.dlq  │◀─────────┘                                 │
+│  │    (ERRORS)   │                                            │
+│  └─────────────────┘                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│              OPENCODE PLUGIN                            │
+│  ┌──────────────┐    ┌──────────────┐                  │
+│  │  CONSUMER  │───▶│    AGENT   │                  │
+│  │ (kafkajs) │    │  (SDK)    │                  │
+│  └──────────────┘    └──────────────┘                  │
+│         │                                               │
+│         ↓                                               │
+│  ┌──────────────────────────────────┐                   │
+│  │     10-STEP MESSAGE HANDLER       │                   │
+│  │ 1. Parse JSON from message       │                   │
+│  │ 2. Match rule via JSONPath      │                   │
+│  │ 3. Build prompt template      │                   │
+│  │ 4. Call OpenCode agent       │                   │
+│  │ 5. Extract response text   │                   │
+│  │ 6. Send to response topic  │                   │
+│  │ 7. OR: Send to DLQ      │                   │
+│  │ 8. Commit offset        │                   │
+│  │ 9. Handle errors      │                   │
+│  │ 10. Graceful shutdown│                   │
+│  └──────────────────────────────────┘                   │
+└─────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────┐
+│              OPENCODE AGENT                         │
+│         Processes prompts, returns responses          │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- **Docker** or **Podman**
+- **Node.js** 20+
+
+### Step 1: Start Kafka
+
+```bash
+cd /home/gna/workspase/projects/opencode-plugin-kafka
+docker-compose -f docker-compose.kafka.yml up -d
+```
+
+Verify Kafka is ready (check UI at http://localhost:8090):
+
+```bash
+# Wait for Kafka to be healthy
+docker-compose -f docker-compose.kafka.yml ps
+```
+
+### Step 2: Build Plugin
 
 ```bash
 npm install
+npm run build
 ```
 
-### Зависимости
+### Step 3: Run Demo
 
-- `kafkajs` — Kafka клиент
-- `zod` — runtime валидация конфигурации
-- `jsonpath-plus` — JSONPath запросы для маршрутизации
+```bash
+npm run demo
+```
 
-## Конфигурация
+This demo will:
+1. Connect producer to Kafka
+2. Send a test message to `opencode.prompts`
+3. The consumer (plugin) picks up the message
+4. Matches the JSONPath rule
+5. Builds the final prompt
+6. Invokes the OpenCode agent (via SDK)
+7. Produces response to `opencode.responses`
 
-Создай `.opencode/kafka-router.json`:
+---
+
+## Demo Scenario Walkthrough
+
+### Scenario: Complete E2E Flow
+
+**Input Message:**
 
 ```json
 {
-  "topics": ["incoming-tasks"],
+  "task_id": "demo-001",
+  "type": "code_review",
+  "payload": {
+    "repo": "my-app",
+    "files": ["src/index.ts", "src/utils.ts"]
+  }
+}
+```
+
+**Execution Flow:**
+
+```
+[Step 1] Message received from opencode.prompts
+  ↓
+[Step 2] Parse JSON: { task_id, type, payload }
+  ↓
+[Step 3] JSONPath matching:
+  - Rule: jsonPath="$" 
+  - Result: non-empty (entire payload matches)
+  - Match: "default-prompt-rule"
+  ↓
+[Step 4] Build prompt:
+  - Template: "Выполни задачу: ${$.task || $.prompt}"
+  - Result: "Выполни задачу: code_review"
+  ↓
+[Step 5] Call OpenCode agent:
+  - agentId: "e2e-responder"
+  - Timeout: 120s
+  ↓
+[Step 6] Response received
+  ↓
+[Step 7] Send to opencode.responses:
+{
+  "sessionId": "session-uuid",
+  "ruleName": "default-prompt-rule",
+  "agentId": "e2e-responder",
+  "response": "Agent response text",
+  "status": "success",
+  "executionTimeMs": 2456,
+  "timestamp": "2026-05-19T12:00:00.000Z"
+}
+```
+
+---
+
+## SSL Configuration
+
+### SSL Ports
+
+The plugin supports two connection modes:
+
+| Port | Protocol | Description |
+|------|----------|-------------|
+| 9092 | PLAINTEXT_INTERNAL | Internal plaintext (within docker network) |
+| 9093 | PLAINTEXT_EXTERNAL | External plaintext (localhost) |
+| 9095 | SSL_EXTERNAL | External SSL/TLS (localhost) |
+
+### Quick SSL Setup (Development)
+
+The kafka-ssl directory already contains pre-generated certificates:
+
+```bash
+# List available certificates
+ls -la kafka-ssl/
+```
+
+Certificates:
+- `ca.pem` — Certificate Authority
+- `client.pem`, `client-key.pem` — Client certificate and key
+- `server.pem`, `server-key.pem` — Server certificate and key
+- `kafka.keystore.jks` — Java KeyStore for Kafka broker
+- `kafka.truststore.jks` — Java TrustStore for Kafka broker
+
+### Start Kafka with SSL
+
+```bash
+# Start Kafka with SSL listener
+docker compose -f docker-compose.kafka.yml up -d
+
+# Verify SSL port is exposed
+docker compose -f docker-compose.kafka.yml ps
+# Should show: 0.0.0.0:9095->9095/tcp for SSL
+```
+
+### SSL with PEM Certificates
+
+Configure the plugin to use PEM certificates:
+
+```bash
+# Using PEM certificates
+export KAFKA_BROKERS="localhost:9095"
+export KAFKA_CLIENT_ID="my-ssl-client"
+export KAFKA_GROUP_ID="my-consumer-group"
+export KAFKA_SSL="true"
+export KAFKA_SSL_CA="./kafka-ssl/ca.pem"
+export KAFKA_SSL_CERT="./kafka-ssl/client.pem"
+export KAFKA_SSL_KEY="./kafka-ssl/client-key.pem"
+```
+
+### Simple SSL (System TrustStore)
+
+For simpler setups without custom certificates:
+
+```bash
+# Just enable SSL (uses system truststore)
+export KAFKA_BROKERS="localhost:9095"
+export KAFKA_CLIENT_ID="my-ssl-client"
+export KAFKA_GROUP_ID="my-consumer-group"
+export KAFKA_SSL="true"
+```
+
+### SSL Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `KAFKA_SSL` | Enable SSL (`true`/`false`) | No (default: false) |
+| `KAFKA_SSL_CA` | Path to CA certificate (PEM) | For PEM auth |
+| `KAFKA_SSL_CERT` | Path to client certificate (PEM) | For PEM auth |
+| `KAFKA_SSL_KEY` | Path to client private key (PEM) | For PEM auth |
+| `KAFKA_SASL_MECHANISM` | SASL mechanism (PLAIN, SCRAM-SHA-256, etc.) | No |
+| `KAFKA_USERNAME` | SASL username | No |
+| `KAFKA_PASSWORD` | SASL password | No |
+
+### Run SSL Demo
+
+```bash
+# Build the project first
+npm run build
+
+# Run the SSL demo script
+node scripts/demo-ssl.mjs
+
+# Or with explicit SSL flags
+npm run demo:ssl
+```
+
+Expected output when Kafka is running with SSL:
+```
+[...] Mode: SSL (TLS)
+[...] Brokers: localhost:9095
+[...] ✓ Kafka client created
+[...] Connecting to Kafka...
+[...] ✓ Consumer connected - SSL handshake successful!
+```
+
+### Troubleshooting SSL
+
+**Connection Refused:**
+```bash
+# Check Kafka is running
+docker compose -f docker-compose.kafka.yml ps
+
+# Check SSL port is listening
+ss -tlnp | grep 9095
+```
+
+**Certificate Errors:**
+```bash
+# Verify certificates exist
+ls -la kafka-ssl/ca.pem kafka-ssl/client.pem kafka-ssl/client-key.pem
+
+# Regenerate if needed
+cd kafka-ssl && ./generate-certs.sh
+```
+
+**Plaintext Fallback:**
+```bash
+# If SSL fails, use plaintext
+export KAFKA_BROKERS="localhost:9093"
+export KAFKA_SSL="false"
+```
+
+---
+
+## Kafka UI Access
+
+**URL:** http://localhost:8090
+
+### Viewing Messages
+
+1. Open Kafka UI at http://localhost:8090
+2. Select cluster "local"
+3. Navigate to **Topics**
+4. Click on a topic (e.g., `opencode.prompts`)
+5. View messages under **Messages** tab
+
+### Monitoring Topics
+
+| Topic | Description | Direction |
+|-------|------------|----------|
+| `opencode.prompts` | Input messages | IN |
+| `opencode.responses` | Successful agent responses | OUT |
+| `opencode.dlq` | Failed/error messages | ERROR |
+
+---
+
+## Configuration Reference
+
+### kafka-router.json Schema
+
+```json
+{
+  "version": "003",
+  "topics": ["opencode.prompts"],
+  "dlqTopic": "opencode.dlq",
   "rules": [
     {
-      "name": "ibs-plan-rule",
-      "jsonPath": "$.plan.opencode",
-      "promptTemplate": "Execute: ${$.plan.opencode}",
-      "agentId": "code-executor",
-      "responseTopic": "outgoing-responses",
+      "name": "rule-name",
+      "jsonPath": "$.field.path",
+      "promptTemplate": "Do: ${$.field}",
+      "agentId": "agent-id",
+      "responseTopic": "output-topic",
       "timeoutMs": 120000,
       "concurrency": 1
     }
@@ -45,238 +323,53 @@ npm install
 }
 ```
 
-| Поле | Тип | Обязательно | Описание |
-|------|-----|-------------|----------|
-| `name` | `string` | Да | Уникальное имя правила |
-| `jsonPath` | `string` | Да | JSONPath выражение для фильтрации |
-| `promptTemplate` | `string` | Да | Шаблон промпта с `${$.path}` placeholders |
-| `agentId` | `string` | Да | ID агента для вызова |
-| `responseTopic` | `string` | Нет | Топик для ответов |
-| `timeoutMs` | `number` | Нет | Таймаут (по умолчанию: 120000) |
-| `concurrency` | `number` | Нет | Параллельность (по умолчанию: 1) |
+### Rule Properties
 
-## Environment Variables
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `name` | string | Yes | — | Unique rule name |
+| `jsonPath` | string | Yes | — | JSONPath expression to match |
+| `promptTemplate` | string | Yes | — | Prompt with `${$.path}` placeholders |
+| `agentId` | string | Yes | — | OpenCode agent ID |
+| `responseTopic` | string | No | — | Topic for responses |
+| `timeoutMs` | number | No | 120000 | Timeout in ms |
+| `concurrency` | number | No | 1 | Parallel processing |
 
-| Переменная | Обязательно | Описание |
-|-----------|-------------|----------|
-| `KAFKA_BROKERS` | Да | Список брокеров через запятую |
-| `KAFKA_CLIENT_ID` | Да | ID клиента |
-| `KAFKA_GROUP_ID` | Да | Группа consumer |
-| `KAFKA_DLQ_TOPIC` | Нет | DLQ топик |
-| `KAFKA_SSL` | Нет | `true` для SSL |
-| `KAFKA_SASL_MECHANISM` | Нет | SASL механизм |
-| `KAFKA_SASL_USERNAME` | Нет | SASL username |
-| `KAFKA_SASL_PASSWORD` | Нет | SASL password |
-| `KAFKA_ROUTER_CONFIG` | Нет | Путь к конфигурации |
+---
 
-## Использование
+## Troubleshooting
 
-### Парсинг конфигурации
+### Common Issues
 
-```typescript
-import { parseConfigV003 } from './core/config.js';
-
-const config = parseConfigV003();
-// config: PluginConfigV003 { topics: [...], rules: [...] }
-```
-
-### Подбор правила (V003)
-
-```typescript
-import { matchRuleV003 } from './core/routing.js';
-import type { RuleV003, Payload } from './schemas/index.js';
-
-const payload: Payload = { plan: { opencode: 'analyze code' } };
-const rules: RuleV003[] = [
-  {
-    name: 'ibs-plan-rule',
-    jsonPath: '$.plan.opencode',
-promptTemplate: 'Execute: ${$.plan.opencode}',
-    agentId: 'code-executor',
-    timeoutMs: 120000,
-    concurrency: 1
-  }
-];
-
-const matched = matchRuleV003(payload, rules);
-// matched: RuleV003 или null
-```
-
-### Построение промпта (V003)
-
-```typescript
-import { buildPromptV003 } from './core/prompt.js';
-import type { RuleV003 } from './schemas/index.js';
-
-const rule: RuleV003 = {
-  name: 'ibs-plan-rule',
-  jsonPath: '$.plan.opencode',
-  promptTemplate: 'Execute: ${$.plan.opencode}',
-  agentId: 'code-executor',
-  timeoutMs: 120000,
-  concurrency: 1
-};
-
-const payload = { plan: { opencode: 'analyze code' } };
-const prompt = buildPromptV003(rule, payload);
-// prompt: 'Execute: analyze code'
-```
-
-### Запуск consumer
-
-```typescript
-import { startConsumer } from './kafka/consumer.js';
-import { OpenCodeAgentAdapter } from './opencode/OpenCodeAgentAdapter.js';
-import type { PluginConfigV003 } from './schemas/index.js';
-
-const config: PluginConfigV003 = parseConfigV003();
-const agent = new OpenCodeAgentAdapter(client);
-
-await startConsumer(config, agent);
-// Consumer запущен, обработка сообщений начата
-```
-
-### Data Flow
-
-```
-Kafka Topic
-    ↓
-1. eachMessageHandler: parse JSON
-2. matchRuleV003: подбор правила по jsonPath
-3. buildPromptV003: построение промпта
-4. agent.invoke(): вызов агента
-    ↓
-    ├── success → responseTopic → commit offset
-    ├── error → dlqTopic → commit offset
-    └── timeout → dlqTopic → commit offset
-```
-
-## Доступные функции
-
-### Core
-
-| Функция | Сигнатура | Описание |
-|--------|-----------|----------|
-| `parseConfigV003` | `() => PluginConfigV003` | Парсинг и валидация конфигурации |
-| `matchRuleV003` | `(payload: Payload, rules: RuleV003[]) => RuleV003 \| null` | Подбор первого совпадающего правила |
-| `buildPromptV003` | `(rule: RuleV003, payload: unknown) => string` | Построение промпта с подстановкой placeholders |
-
-### Kafka
-
-| Функция | Сигнатура | Описание |
-|--------|-----------|----------|
-| `startConsumer` | `(config: PluginConfigV003, agent: IOpenCodeAgent) => Promise<void>` | Запуск consumer |
-| `eachMessageHandler` | `(payload, config, dlqProducer, commitOffsets, state, agent, responseProducer, activeSessions) => Promise<void>` | Обработка одного сообщения (10-step pipeline) |
-| `performGracefulShutdown` | `(consumer, dlqProducer, responseProducer, activeSessions, state) => Promise<void>` | Graceful shutdown |
-| `createKafkaClient` | `(config: PluginConfigV003) => Kafka` | Создание Kafka клиента |
-| `createConsumer` | `(client: Kafka, config: PluginConfigV003) => Consumer` | Создание consumer |
-| `createDlqProducer` | `(client: Kafka) => Producer` | Создание DLQ producer |
-| `createResponseProducer` | `(client: Kafka) => Producer` | Создание response producer |
-
-### DLQ & Response
-
-| Функция | Сигнатура | Описание |
-|--------|-----------|----------|
-| `sendToDlq` | `(producer, topic, message, rule, error) => Promise<void>` | Отправка в DLQ |
-| `sendResponse` | `(producer, topic, sessionId, result) => Promise<void>` | Отправка ответа |
-
-### OpenCode Agent
-
-| Функция | Сигнатура | Описание |
-|--------|-----------|----------|
-| `IOpenCodeAgent.invoke` | `(options: InvokeOptions) => Promise<AgentResult>` | Вызов агента |
-| `OpenCodeAgentAdapter` | `(client: SDKClient)` | Адаптер для OpenCode SDK |
-| `MockOpenCodeAgent` | тестовый мок | Мок для unit тестов |
-
-## Тестирование
+**Issue: "Broker not reachable"**
 
 ```bash
-# Unit тесты
-npm run test
+# Check Kafka is running
+docker-compose -f docker-compose.kafka.yml ps
 
-# Coverage (90%+ threshold)
-npm run test:coverage
-
-# Integration тесты (требуется Docker/Podman + Redpanda)
-npm run test:integration
+# Restart Kafka
+docker-compose -f docker-compose.kafka.yml restart kafka
 ```
 
-### Тесты
+**Issue: "Topic does not exist"**
 
-- `tests/unit/config.test.ts` — валидация конфигурации
-- `tests/unit/routing.test.ts` — matchRuleV003 логика
-- `tests/unit/prompt.test.ts` — buildPromptV003 логика
-- `tests/unit/types-verification.test.ts` — проверка типов
-
-## Структура проекта
-
-```
-src/
-├── index.ts                        # Plugin entry point (export default plugin)
-├── opencode/
-│   ├── IOpenCodeAgent.ts         # Interface: AgentResult, InvokeOptions
-│   ├── OpenCodeAgentAdapter.ts   # Production adapter (SDK)
-│   ├── MockOpenCodeAgent.ts    # Test mock
-│   └── AgentError.ts           # TimeoutError, AgentError
-├── kafka/
-│   ├── client.ts               # createKafkaClient, createConsumer, createDlqProducer
-│   ├── consumer.ts           # eachMessageHandler, startConsumer, performGracefulShutdown
-│   ├── dlq.ts                # sendToDlq, DlqEnvelope
-│   └── response-producer.ts  # sendResponse, ResponseMessage
-├── core/
-│   ├── config.ts             # parseConfigV003, validateTopicCoverage
-│   ├── routing.ts           # matchRuleV003 (pure function)
-│   ├── prompt.ts            # buildPromptV003
-│   └── index.ts             # Public API re-exports
-├── schemas/
-│   └── index.ts            # Zod schemas + types via z.infer<>
-└── types/
-    ├── opencode-plugin.d.ts # PluginContext, PluginHooks
-    └── opencode-sdk.d.ts     # SDKClient, SessionsAPI
+```bash
+# Kafka auto-creates topics, or create manually:
+podman exec redpanda rpk topic create opencode.prompts
 ```
 
-## Архитектура
+**Issue: "No messages in response topic"**
 
-### Domain Isolation
+- Wait 5 seconds for processing
+- Check consumer logs
+- Verify `responseTopic` in config
 
-Маршрутизация реализована как pure function без side effects. `matchRuleV003` принимает payload и rules, возвращает первое совпадающее правило или null.
+---
 
-### Resiliency
+## Files Created
 
-Каждое сообщение обрабатывается в try-catch блоке. Ошибки не крашат consumer — они отправляются в DLQ.
-
-### No-State Consumer
-
-Consumer не хранит состояние между сообщениями. Метрики (totalMessagesProcessed, dlqMessagesCount) — единственное состояние.
-
-### Strict Initialization
-
-Конфигурация валидируется через Zod при старте. Невалидная конфигурация выбрасывает ошибку (fail-fast).
-
-### FR-017 Topic Coverage
-
-Проверяется, что responseTopic не совпадает с input topics (предотвращение зацикливания).
-
-## Edge Cases
-
-| Сценарий | Поведение |
-|----------|-----------|
-| Invalid JSON в сообщении | Отправка в DLQ |
-| Нет совпадающего правила | Пропуск сообщения, commit offset |
-| Agent timeout | Отправка в DLQ, AbortController.cancel() |
-| Agent error | Отправка в DLQ с error.message |
-| DLQ send failure | Логирование ошибки, commit offset |
-| Oversized message (>1MB) | Отправка в DLQ |
-| Null value (tombstone) | Пропуск, commit offset если KAFKA_IGNORE_TOMBSTONES=true |
-
-## Конституция (5 NON-NEGOTIABLE принципов)
-
-1. **Strict Initialization** — невалидная конфигурация падает при старте (fail-fast), включая FR-017 topic coverage validation
-2. **Domain Isolation** — routing logic как pure function без side effects
-3. **Resiliency** — try-catch в eachMessage handler, ошибки не крашат consumer
-4. **No-State Consumer** — никакого session state между сообщениями
-5. **Test-First Development** — unit tests писать до имплементации, 90%+ coverage
-
-## Лицензия
-
-MIT
+| File | Description |
+|------|-------------|
+| `/home/gna/workspase/projects/opencode-plugin-kafka/README.md` | Main documentation |
+| `/home/gna/workspase/projects/opencode-plugin-kafka/scripts/demo-e2e-flow.mjs` | E2E demo script |
+| `/home/gna/workspase/projects/opencode-plugin-kafka/DEMO-MANAGEMENT.md` | Management demo guide |

@@ -61,6 +61,10 @@ export type PluginConfig = z.infer<typeof PluginConfigSchema>;
  * Validates Kafka client configuration from process.env.
  * Uses .passthrough() to allow extra process.env keys (PATH, HOME, USER, etc.).
  *
+ * SSL can be configured either via:
+ * - Simple: KAFKA_SSL=true (uses system truststore)
+ * - With PEM certificates: KAFKA_SSL_CA, KAFKA_SSL_CERT, KAFKA_SSL_KEY paths
+ *
  * @see https://kafka.js.org/docs/configuration
  */
 export const kafkaEnvSchema = z
@@ -75,6 +79,11 @@ export const kafkaEnvSchema = z
       .enum(['true', 'false'])
       .optional()
       .transform((v) => v === 'true'),
+
+    // Optional SSL with PEM certificates (overrides simple SSL)
+    KAFKA_SSL_CA: z.string().optional(),
+    KAFKA_SSL_CERT: z.string().optional(),
+    KAFKA_SSL_KEY: z.string().optional(),
 
     // Optional SASL authentication
     KAFKA_USERNAME: z.string().optional(),

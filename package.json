@@ -5,6 +5,10 @@
   "scripts": {
     "build": "tsc",
     "check": "npm run lint && npm run test",
+    "demo": "node scripts/demo-simple.mjs",
+    "demo:e2e": "node scripts/demo-e2e-flow.mjs",
+    "demo:full": "node scripts/demo-full.mjs",
+    "demo:ssl": "node scripts/demo-ssl.mjs",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "vitest run --dangerouslyIgnoreUnhandledErrors",

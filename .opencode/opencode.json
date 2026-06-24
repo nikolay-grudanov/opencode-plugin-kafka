@@ -123,12 +123,12 @@
     },
     "e2e-responder": {
       "description": "Тестовый агент для E2E-тестирования. Отвечает кратко, без инструментов.",
-      "mode": "subagent",
-      "model": "lemonade/extra.Qwen3.5-9B-GGUF",
+      "mode": "all",
+      "model": "minimax-coding-plan/MiniMax-M2",
       "prompt": "{file:agents/e2e-responder.md}",
       "temperature": 0.1,
       "permission": {
-        "*": "deny"
+        "*": "allow"
       }
     }
   },

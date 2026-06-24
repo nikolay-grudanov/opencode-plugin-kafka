@@ -863,7 +863,7 @@ export async function startConsumer(
   );
 
   // 1. Создаем Kafka клиент (FR-019)
-  const { kafka, validatedEnv } = createKafkaClient(process.env);
+  const { kafka, validatedEnv } = await createKafkaClient(process.env);
 
   // 2. Создаем consumer (FR-020)
   const consumer = createConsumer(kafka, validatedEnv.KAFKA_GROUP_ID);

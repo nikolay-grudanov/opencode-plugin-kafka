@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { SDKClient, MessagePart, Session, AssistantMessage } from '../../../src/types/opencode-sdk.js';
+import type { SDKClient, Session, AssistantMessage, Message, MessagePart } from '../../../src/types/opencode-sdk.js';
 import type { IOpenCodeAgent } from '../../../src/opencode/IOpenCodeAgent.js';
 
 describe('extractResponseText', () => {
@@ -76,7 +76,7 @@ function createMockSDKClient(overrides?: {
   promptSession?: () => Promise<{ data: AssistantMessage; error: null }>;
   abortSession?: () => Promise<{ data: boolean; error: null }>;
   deleteSession?: () => Promise<{ data: boolean; error: null }>;
-  messagesSession?: () => Promise<{ data: never[]; error: null }>;
+  messagesSession?: () => Promise<{ data: Message[]; error: null }>;
 }): SDKClient {
   return {
     session: {
@@ -106,10 +106,15 @@ describe('OpenCodeAgentAdapter', () => {
   });
 
   it('должен возвращать результат success при успешном вызове SDK', async () => {
-    const mockClient = createMockSDKClient();
+    const mockClient = createMockSDKClient({
+      messagesSession: () => Promise.resolve({
+        data: [{ role: 'assistant', parts: [{ type: 'text', text: 'response' }] }],
+        error: null
+      }),
+    });
 
     const adapter = new OpenCodeAgentAdapter(mockClient);
-    const result = await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 5000 });
+    const result = await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 10000 });
 
     expect(result.status).toBe('success');
     expect(result.response).toBe('response');
@@ -184,10 +189,14 @@ describe('OpenCodeAgentAdapter', () => {
 
     const mockClient = createMockSDKClient({
       promptSession: promptSpy as never,
+      messagesSession: () => Promise.resolve({
+        data: [{ role: 'assistant', parts: [{ type: 'text', text: 'response' }] }],
+        error: null
+      }),
     });
 
     const adapter = new OpenCodeAgentAdapter(mockClient);
-    await adapter.invoke('test prompt', 'my-test-agent', { timeoutMs: 5000 });
+    await adapter.invoke('test prompt', 'my-test-agent', { timeoutMs: 10000 });
 
     expect(promptSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -467,7 +476,12 @@ describe('OpenCodeAgentAdapter - signal handling edge cases', () => {
 
   it('invoke должен возвращать error когда session.abort выбрасывает ошибку (ветка catch)', async () => {
     // Мокаем client чтобы abort выбрасывал ошибку
-    const mockClient = createMockSDKClient();
+    const mockClient = createMockSDKClient({
+      messagesSession: () => Promise.resolve({
+        data: [{ role: 'assistant', parts: [{ type: 'text', text: 'response' }] }],
+        error: null
+      }),
+    });
     // Переопределяем session.abort чтобы выбрасывал ошибку
     mockClient.session.abort = async () => {
       throw new Error('Abort failed');
@@ -476,7 +490,7 @@ describe('OpenCodeAgentAdapter - signal handling edge cases', () => {
     const adapter = new OpenCodeAgentAdapter(mockClient);
 
     // Вызываем invoke и получаем sessionId
-    const result = await adapter.invoke('prompt', 'test-agent', { timeoutMs: 5000 });
+    const result = await adapter.invoke('prompt', 'test-agent', { timeoutMs: 10000 });
     const sessionId = result.sessionId;
 
     // Вызываем abort для этой сессии - должен вернуть false из-за catch

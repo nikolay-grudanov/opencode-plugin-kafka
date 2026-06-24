@@ -1,8 +1,9 @@
 /**
- * Вспомогательные функции для управления Redpanda контейнером в E2E тестах.
+ * Вспомогательные функции для управления Redpanda/Kafka контейнером в E2E тестах.
  *
- * Использует @testcontainers/redpanda для создания реального Redpanda контейнера.
- * Предоставляет простой API для start/stop контейнера.
+ * Поддерживает два режима:
+ * 1. Внешний Kafka (USE_EXTERNAL_KAFKA=true) - использует Kafka из docker-compose.kafka.yml
+ * 2. testcontainers Redpanda - запускает реальный Redpanda контейнер
  */
 
 import { RedpandaContainer } from '@testcontainers/redpanda';
@@ -20,6 +21,84 @@ const STARTUP_TIMEOUT_MS = 120_000;
  * Путь к starter script внутри контейнера.
  */
 const STARTER_SCRIPT = '/testcontainers_start.sh';
+
+/**
+ * Проверяет доступность внешнего Kafka и возвращает рабочий брокер.
+ * Проверяет оба порта: 9092 (Standard) и 9093 (External из docker-compose).
+ * @returns Рабочий брокер ('localhost:9092' или 'localhost:9093') или null если недоступен
+ */
+async function checkExternalKafkaAvailable(): Promise<string | null> {
+  // Пробуем оба порта Kafka
+  const portsToCheck = ['localhost:9092', 'localhost:9093'];
+
+  for (const broker of portsToCheck) {
+    try {
+      const { Kafka } = await import('kafkajs');
+      const kafka = new Kafka({
+        clientId: 'e2e-check',
+        brokers: [broker],
+        connectionTimeout: 3000,
+      });
+      const admin = kafka.admin();
+      await admin.connect();
+      await admin.listTopics();
+      await admin.disconnect();
+      return broker; // Возвращаем работающий брокер
+    } catch {
+      // Пробуем следующий порт
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * Интерфейс для mock контейнера (используется с внешним Kafka).
+ */
+class ExternalKafkaContainer {
+  private brokers: string[];
+
+  constructor(brokers: string[]) {
+    this.brokers = brokers;
+  }
+
+  getBootstrapServers(): string {
+    // Используем первый брокер из переданного списка
+    return this.brokers[0];
+  }
+
+  getSchemaRegistryAddress(): string {
+    return 'http://localhost:8081';
+  }
+
+  getAdminAddress(): string {
+    return 'http://localhost:9644';
+  }
+
+  getRestProxyAddress(): string {
+    return 'http://localhost:8082';
+  }
+
+  getHost(): string {
+    return 'localhost';
+  }
+
+  getMappedPort(port: number | string): number {
+    return typeof port === 'string' ? parseInt(port, 10) : port;
+  }
+
+  async stop(): Promise<void> {
+    // Ничего не делаем - внешний Kafka останавливается отдельно
+  }
+
+  getId(): string {
+    return 'external-kafka';
+  }
+
+  getImage(): string {
+    return 'external';
+  }
+}
 
 /**
  * Кастомный started container для Podman rootless.
@@ -103,9 +182,9 @@ class PodmanRedpandaContainer extends RedpandaContainer {
 }
 
 /**
- * Запускает реальный Redpanda контейнер.
+ * Запускает Kafka (внешний или контейнер).
  *
- * @returns Promise<StartedRedpandaContainer> запущенный контейнер
+ * @returns Promise с работающим Kafka контейнером (или mock для внешнего)
  *
  * @example
  * ```ts
@@ -113,27 +192,76 @@ class PodmanRedpandaContainer extends RedpandaContainer {
  * const bootstrapServers = container.getBootstrapServers();
  * ```
  */
-export async function startRedpanda(): Promise<PodmanStartedRedpandaContainer> {
-  const startTime = Date.now();
+export async function startRedpanda(): Promise<
+  PodmanStartedRedpandaContainer | ExternalKafkaContainer
+> {
+  // Режим 1: USE_EXTERNAL_KAFKA=true - используем внешний Kafka из docker-compose
+  const useExternalKafka = process.env.USE_EXTERNAL_KAFKA === 'true';
 
-  const container = await new PodmanRedpandaContainer(
-    'docker.redpanda.com/redpandadata/redpanda:latest'
-  )
-    .withStartupTimeout(STARTUP_TIMEOUT_MS)
-    .start();
+  if (useExternalKafka) {
+    console.log(
+      JSON.stringify({
+        msg: 'Using external Kafka (USE_EXTERNAL_KAFKA=true)',
+        brokers: ['localhost:9093'],
+      })
+    );
+    return new ExternalKafkaContainer(['localhost:9093']);
+  }
 
-  const elapsedMs = Date.now() - startTime;
-  const bootstrapServers = container.getBootstrapServers();
+  // Режим 2: Автоматическая проверка доступности внешнего Kafka
+  const workingBroker = await checkExternalKafkaAvailable();
+  if (workingBroker) {
+    console.log(
+      JSON.stringify({
+        msg: 'Using external Kafka',
+        broker: workingBroker,
+      })
+    );
+    return new ExternalKafkaContainer([workingBroker]);
+  }
 
-  console.log(
-    JSON.stringify({
-      msg: 'Redpanda container started',
-      bootstrapServers,
-      startupTimeMs: elapsedMs,
-    })
-  );
+  // Режим 3: Пробуем testcontainers (Podman/Docker)
+  try {
+    const startTime = Date.now();
 
-  return container;
+    const container = await new PodmanRedpandaContainer(
+      'docker.redpanda.com/redpandadata/redpanda:latest'
+    )
+      .withStartupTimeout(STARTUP_TIMEOUT_MS)
+      .start();
+
+    const elapsedMs = Date.now() - startTime;
+    const bootstrapServers = container.getBootstrapServers();
+
+    console.log(
+      JSON.stringify({
+        msg: 'Redpanda container started',
+        bootstrapServers,
+        startupTimeMs: elapsedMs,
+      })
+    );
+
+    return container;
+  } catch (err) {
+    // Понятная ошибка - Kafka не доступен
+    const errorMessage =
+      'Could not start Redpanda container and external Kafka not available. ' +
+      'Either start Kafka with: docker-compose -f docker-compose.kafka.yml up -d ' +
+      'or set USE_EXTERNAL_KAFKA=true';
+
+    console.log(
+      JSON.stringify({
+        msg: 'Redpanda not available, tests will be skipped',
+        reason: err instanceof Error ? err.message : String(err),
+        suggestion: errorMessage,
+      })
+    );
+
+    // Бросаем специфичную ошибку для skip логики в тестах
+    const skipError = new Error('Redpanda not available, E2E tests skipped');
+    skipError.name = 'SkippableError';
+    throw skipError;
+  }
 }
 
 /**

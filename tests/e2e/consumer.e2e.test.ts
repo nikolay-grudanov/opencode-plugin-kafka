@@ -104,6 +104,7 @@ describe('Kafka consumer E2E', () => {
   let redpandaContainer: StartedRedpandaContainer;
   let opencodeHandle: Awaited<ReturnType<typeof spawnOpenCodeServe>>;
   let configHashBefore: string | null = null;
+  let kafkaSkipped = false; // Флаг для skip логики когда Kafka недоступен
 
   /**
    * Вычисляет SHA256 хэш файла.
@@ -175,10 +176,28 @@ describe('Kafka consumer E2E', () => {
       const configPath = join(homedir(), '.config', 'opencode', 'opencode.json');
       configHashBefore = computeFileHash(configPath);
 
-      // 2. Start Redpanda
-      redpandaContainer = await startRedpanda();
+      // 2. Start Redpanda (with skip support)
+      try {
+        redpandaContainer = await startRedpanda();
+      } catch (error) {
+        // If Kafka not available - mark skipped and skip tests
+        if (error instanceof Error && error.name === 'SkippableError') {
+          kafkaSkipped = true;
+          console.log(
+            JSON.stringify({
+              msg: 'Kafka not available, consumer E2E tests will be skipped',
+            })
+          );
+          return;
+        }
+        throw error;
+      }
+
       const bootstrapServers = redpandaContainer.getBootstrapServers();
       brokers = [bootstrapServers];
+
+      // Wait for Kafka to be fully ready
+      await new Promise((resolve) => setTimeout(resolve, 2000));
 
       // 3. Spawn opencode serve
       opencodeHandle = await spawnOpenCodeServe();

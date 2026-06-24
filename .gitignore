@@ -39,3 +39,10 @@ entities.json
 
 # Graphify output
 graphify-out/
+
+# Kafka SSL (generated)
+kafka-ssl/*.jks
+kafka-ssl/*.key
+kafka-ssl/*.p12
+kafka-ssl/*.srl
+.env.kafka
