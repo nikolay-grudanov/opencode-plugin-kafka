@@ -20,17 +20,19 @@ import type { Producer } from 'kafkajs';
  * @returns Санитизированное сообщение
  */
 function sanitizeErrorMessage(message: string): string {
-  return message
-    // Маскируем пароли в формате password=xxx, password: xxx, "password":"xxx"
-    .replace(/password\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'password=***')
-    // Маскируем токены
-    .replace(/token\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'token=***')
-    // Маскируем API ключи
-    .replace(/api[_-]?key\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'api_key=***')
-    // Маскируем secret
-    .replace(/secret\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'secret=***')
-    // Ограничиваем длину
-    .slice(0, 1000);
+  return (
+    message
+      // Маскируем пароли в формате password=xxx, password: xxx, "password": "***"
+      .replace(/password\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'password=***')
+      // Маскируем токены
+      .replace(/token\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'token=***')
+      // Маскируем API ключи
+      .replace(/api[_-]?key\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'api_key=***')
+      // Маскируем secret
+      .replace(/secret\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, 'secret=***')
+      // Ограничиваем длину
+      .slice(0, 1000)
+  );
 }
 
 /**
@@ -43,6 +45,9 @@ function sanitizeErrorMessage(message: string): string {
 export interface DlqEnvelope {
   /** Оригинальное значение сообщения (может быть null для tombstone) */
   originalValue: string | null;
+
+  /** Alias для originalValue — имя поля ожидаемое E2E тестами */
+  failedMessage: string | null;
 
   /** Имя оригинального топика */
   topic: string;
@@ -61,44 +66,69 @@ export interface DlqEnvelope {
 
   /** Ключ оригинального сообщения (может быть null) */
   originalKey?: string | null;
+
+  // --- spec-009: optional fields for tool-based delivery diagnostics ---
+
+  /** Was the LLM's send_to_kafka_* tool called during the session? */
+  toolCallObserved?: boolean;
+
+  /** Was fallbackToTextCapture mode engaged? */
+  fallbackUsed?: boolean;
+
+  /** How long the session lived before being DLQ'd (ms). */
+  sessionDurationMs?: number;
 }
 
 /**
  * Отправляет сообщение в Dead Letter Queue (DLQ).
  *
  * Конструирует DLQ envelope с originalValue, topic, partition, offset, errorMessage, failedAt.
- * Целевой топик берётся из KAFKA_DLQ_TOPIC env или ${topic}-dlq.
+ *
+ * DLQ topic resolution order (FR-T1 + bug #3 fix):
+ * 1. Explicit `dlqTopic` parameter (passed by eachMessageHandler from PluginConfig.dlqTopic)
+ * 2. KAFKA_DLQ_TOPIC environment variable (back-compat for ad-hoc overrides)
+ * 3. ${originalMessage.topic}-dlq (last-resort fallback)
+ *
  * Обёрнут в try/catch: логирует при ошибке, никогда не бросает исключения.
  *
  * FR-022: constructs DLQ payload with originalValue, topic, partition, offset, errorMessage, failedAt (ISO timestamp);
- *         target topic from KAFKA_DLQ_TOPIC env or ${topic}-dlq;
  *         try/catch wrapper: logs on failure, never throws;
  *         DLQ send failure is non-fatal
  *
  * @param producer - Kafka producer (созданный через createDlqProducer)
  * @param originalMessage - Оригинальное сообщение из Kafka
  * @param error - Ошибка, которая привела к отправке в DLQ
+ * @param dlqTopic - Explicit DLQ topic from PluginConfig.dlqTopic (optional override)
  * @returns Promise<void> — никогда не бросает исключения
  *
  * @example
  * ```ts
- * await sendToDlq(dlqProducer, message, new Error('Invalid JSON'));
+ * await sendToDlq(dlqProducer, message, new Error('Invalid JSON'), 'opencode.dlq');
  * ```
  */
 export async function sendToDlq(
   producer: Producer,
-  originalMessage: { value: string | null; topic: string; partition: number; offset: string | number; originalKey?: string | null },
+  originalMessage: {
+    value: string | null;
+    topic: string;
+    partition: number;
+    offset: string | number;
+    originalKey?: string | null;
+  },
   error: Error,
+  dlqTopic?: string
 ): Promise<void> {
   try {
-    // Определяем целевой DLQ топик
-    const dlqTopic = process.env.KAFKA_DLQ_TOPIC || `${originalMessage.topic}-dlq`;
+    // Определяем целевой DLQ топик (bug #3 fix — explicit param takes precedence)
+    const targetDlqTopic =
+      dlqTopic ?? process.env.KAFKA_DLQ_TOPIC ?? `${originalMessage.topic}-dlq`;
 
     // Конструируем DLQ envelope
     // Санитизируем error message перед отправкой
     const sanitizedErrorMessage = sanitizeErrorMessage(error.message);
     const envelope: DlqEnvelope = {
       originalValue: originalMessage.value,
+      failedMessage: originalMessage.value,
       topic: originalMessage.topic,
       partition: originalMessage.partition,
       offset: String(originalMessage.offset),
@@ -109,7 +139,7 @@ export async function sendToDlq(
 
     // Формируем Kafka record
     const record: ProducerRecord = {
-      topic: dlqTopic,
+      topic: targetDlqTopic,
       messages: [
         {
           value: JSON.stringify(envelope),
@@ -126,13 +156,13 @@ export async function sendToDlq(
       JSON.stringify({
         level: 'info',
         event: 'dlq_sent',
-        topic: dlqTopic,
+        topic: targetDlqTopic,
         originalTopic: originalMessage.topic,
         partition: originalMessage.partition,
         offset: originalMessage.offset,
         errorMessage: error.message,
         failedAt: envelope.failedAt,
-      }),
+      })
     );
   } catch (sendError) {
     // DLQ send failure — non-fatal, логируем и продолжаем
@@ -146,7 +176,7 @@ export async function sendToDlq(
         errorMessage: error.message,
         sendError: sendError instanceof Error ? sendError.message : String(sendError),
         failedAt: new Date().toISOString(),
-      }),
+      })
     );
   }
 }

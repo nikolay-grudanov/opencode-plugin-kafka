@@ -93,6 +93,26 @@ export function parseConfig(): PluginConfig {
 }
 
 /**
+ * Validates spec-009 plugin-level toggles (FR-T2).
+ *
+ * Refuses to allow the plugin to boot when all three toggles are false,
+ * because that combination violates Constitution Principle III (Resiliency):
+ * no delivery mechanism means every Kafka message would go to DLQ.
+ *
+ * @throws {Error} When toolDelivery, eventHook, and pollingFallback are all false
+ */
+export function validateToggles(config: PluginConfigV003): void {
+  const t = config.toggles;
+  if (t.toolDelivery === false && t.eventHook === false && t.pollingFallback === false) {
+    throw new Error(
+      'Invalid plugin toggles: toolDelivery=false, eventHook=false, pollingFallback=false. ' +
+      'No delivery mechanism is active — this would send every Kafka message to DLQ. ' +
+      'Set pollingFallback=true (or toolDelivery=true / eventHook=true) to enable at least one delivery path.'
+    );
+  }
+}
+
+/**
  * Разбирает и валидирует конфигурацию spec 003 из файла kafka-router.json
  *
  * Функция читает файл конфигурации, путь к которому задан через:
@@ -143,6 +163,9 @@ export function parseConfigV003(): PluginConfigV003 {
 
   // FR-017: Проверяем, что responseTopic не совпадает с input topics
   validateTopicCoverage(config);
+
+  // FR-T2 (spec-009): Проверяем, что хотя бы один toggle включён
+  validateToggles(config);
 
   return config;
 }

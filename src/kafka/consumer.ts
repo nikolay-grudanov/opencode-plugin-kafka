@@ -316,7 +316,7 @@ export async function eachMessageHandler(
         partition: payload.partition,
         offset: payload.message.offset,
         originalKey: payload.message.key?.toString() ?? null,
-      }, error);
+      }, error, config.dlqTopic);
       state.dlqMessagesCount++;
       logDlqRate(state);
       await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
@@ -333,7 +333,7 @@ export async function eachMessageHandler(
         partition: payload.partition,
         offset: payload.message.offset,
         originalKey: payload.message.key?.toString() ?? null,
-      }, error);
+      }, error, config.dlqTopic);
       state.dlqMessagesCount++;
       logDlqRate(state);
       await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
@@ -352,7 +352,7 @@ export async function eachMessageHandler(
         partition: payload.partition,
         offset: payload.message.offset,
         originalKey: payload.message.key?.toString() ?? null,
-      }, error);
+      }, error, config.dlqTopic);
       state.dlqMessagesCount++;
       logDlqRate(state);
       await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
@@ -371,7 +371,7 @@ export async function eachMessageHandler(
         partition: payload.partition,
         offset: payload.message.offset,
         originalKey: payload.message.key?.toString() ?? null,
-      }, error);
+      }, error, config.dlqTopic);
       state.dlqMessagesCount++;
       logDlqRate(state);
       await commitOffsets([{ topic: payload.topic, partition: payload.partition, offset: payload.message.offset }]);
@@ -468,7 +468,7 @@ export async function eachMessageHandler(
         partition: payload.partition,
         offset: payload.message.offset,
         originalKey: payload.message.key?.toString() ?? null,
-      }, error);
+      }, error, config.dlqTopic);
       state.dlqMessagesCount++;
 
       console.error(
@@ -502,7 +502,7 @@ export async function eachMessageHandler(
       partition: payload.partition,
       offset: payload.message.offset,
       originalKey: payload.message.key?.toString() ?? null,
-    }, dlqError);
+    }, dlqError, config.dlqTopic);
 
     state.dlqMessagesCount++;
     logDlqRate(state);

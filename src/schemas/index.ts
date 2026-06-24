@@ -113,6 +113,18 @@ export const RuleV003Schema = z.object({
   timeoutMs: z.number().int().positive('Timeout must be positive').default(120_000),
   // Максимальное количество параллельных вызовов (default: 1, v1 — sequential)
   concurrency: z.number().int().min(1, 'Concurrency must be at least 1').max(10, 'Concurrency must be at most 10').default(1),
+
+  // --- spec-009: tool-based response delivery (per-rule fields) ---
+  // requireToolCall: when true, session.idle without tool call sends DLQ envelope
+  requireToolCall: z.boolean().default(true),
+  // fallbackToTextCapture: when true, event.message.part.updated captures last
+  // assistant text and publishes it on session.idle if no tool call fired
+  fallbackToTextCapture: z.boolean().default(false),
+  // safetyNetTimeoutMs: how long after session creation to wait before sending
+  // DLQ if neither tool call nor fallback text arrived
+  safetyNetTimeoutMs: z.number().int().positive().default(60_000),
+  // maxSessionMs: hard wall-clock guard — session exceeding this is force-DLQ'd
+  maxSessionMs: z.number().int().positive().default(300_000),
 });
 
 /**
@@ -137,6 +149,17 @@ export const PluginConfigV003Schema = z.object({
     .min(1, 'At least one topic is required')
     .max(5, 'Maximum 5 topics allowed'),
   rules: z.array(RuleV003Schema).min(1, 'At least one rule is required'),
+  // DLQ topic — spec-009 fix for bug #3. If provided, plugin writes DLQ
+  // envelopes here instead of falling back to `${topic}-dlq` or env var.
+  dlqTopic: z.string().min(1).optional(),
+  // --- spec-009: plugin-level delivery mechanism toggles ---
+  toggles: z
+    .object({
+      toolDelivery: z.boolean().default(true),
+      eventHook: z.boolean().default(true),
+      pollingFallback: z.boolean().default(false),
+    })
+    .default({}),
 });
 
 /**
