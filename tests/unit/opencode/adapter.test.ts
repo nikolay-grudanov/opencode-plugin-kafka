@@ -106,7 +106,7 @@ describe('OpenCodeAgentAdapter', () => {
   it('должен возвращать результат success при успешном вызове SDK', async () => {
     const mockClient = createMockSDKClient();
 
-    const adapter = new OpenCodeAgentAdapter(mockClient);
+    const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
     const result = await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 5000 });
 
     expect(result.status).toBe('success');
@@ -121,7 +121,7 @@ describe('OpenCodeAgentAdapter', () => {
       promptSession: () => new Promise((resolve) => setTimeout(resolve, 200)),
     });
 
-    const adapter = new OpenCodeAgentAdapter(mockClient);
+    const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
     const result = await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 50 });
 
     expect(result.status).toBe('timeout');
@@ -133,7 +133,7 @@ describe('OpenCodeAgentAdapter', () => {
       createSession: () => Promise.reject(new Error('SDK connection refused')),
     });
 
-    const adapter = new OpenCodeAgentAdapter(mockClient);
+    const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
     const result = await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 5000 });
 
     expect(result.status).toBe('error');
@@ -148,7 +148,7 @@ describe('OpenCodeAgentAdapter', () => {
       abortSession: abortSpy,
     });
 
-    const adapter = new OpenCodeAgentAdapter(mockClient);
+    const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
     const result = await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 50 });
 
     expect(result.status).toBe('timeout');
@@ -163,7 +163,7 @@ describe('OpenCodeAgentAdapter', () => {
       deleteSession: deleteSpy,
     });
 
-    const adapter = new OpenCodeAgentAdapter(mockClient);
+    const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
     const result = await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 5000 });
 
     expect(result.status).toBe('error');
@@ -177,7 +177,7 @@ describe('OpenCodeAgentAdapter', () => {
       promptSession: promptSpy as never,
     });
 
-    const adapter = new OpenCodeAgentAdapter(mockClient);
+    const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
     await adapter.invoke('test prompt', 'my-test-agent', { timeoutMs: 5000 });
 
     expect(promptSpy).toHaveBeenCalledWith(
@@ -200,7 +200,7 @@ describe('OpenCodeAgentAdapter', () => {
       },
     };
 
-    const adapter = new OpenCodeAgentAdapter(crashClient);
+    const adapter = new OpenCodeAgentAdapter(crashClient, 'polling');
 
     // Не должен выбросить исключение
     const result = await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 5000 });
@@ -213,7 +213,7 @@ describe('OpenCodeAgentAdapter', () => {
   it('abort возвращает boolean', async () => {
     const mockClient = createMockSDKClient();
 
-    const adapter = new OpenCodeAgentAdapter(mockClient);
+    const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
 
     const abortResult = await adapter.abort('session-123');
 
@@ -226,7 +226,7 @@ describe('OpenCodeAgentAdapter', () => {
       abortSession: abortSpy,
     });
 
-    const adapter = new OpenCodeAgentAdapter(mockClient);
+    const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
     const result = await adapter.abort('session-123');
 
     expect(result).toBe(true);
@@ -239,7 +239,7 @@ describe('OpenCodeAgentAdapter', () => {
       abortSession: abortSpy,
     });
 
-    const adapter = new OpenCodeAgentAdapter(mockClient);
+    const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
     const result = await adapter.abort('session-123');
 
     // abort возвращает false при ошибке (best-effort)
@@ -259,7 +259,7 @@ describe('OpenCodeAgentAdapter', () => {
       },
     };
 
-    const adapter = new OpenCodeAgentAdapter(errorClient);
+    const adapter = new OpenCodeAgentAdapter(errorClient, 'polling');
     
     // Timeout вызовет performCleanup с TimeoutError
     // abort выбросит ошибку, но она будет поймана в catch block (line 167)
