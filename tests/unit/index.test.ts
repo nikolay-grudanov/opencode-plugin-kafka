@@ -106,7 +106,7 @@ describe('plugin', () => {
   });
 
   describe('Should return plugin hooks object', () => {
-    it('should return empty hooks object on success', async () => {
+    it('should register session.error observability hook (ADR-005, spec-006 FR-001)', async () => {
       const validConfig = {
         topics: ['topic1'],
         rules: [
@@ -124,7 +124,46 @@ describe('plugin', () => {
       const plugin = await getDefaultExport();
       const result = await plugin(mockContext);
 
-      expect(result).toEqual({});
+      // Hook object must contain exactly one entry — the session.error handler
+      // mandated by ADR-005 / spec-006 FR-001 / T020.
+      expect(result).toHaveProperty('session.error');
+      expect(typeof result['session.error']).toBe('function');
+
+      // Per ADR-006: this is the ONLY hook we register. No chat.message,
+      // session.idle, or event subscriptions — those would force state
+      // tracking and violate the No-State Consumer principle.
+      expect(Object.keys(result)).toEqual(['session.error']);
+    });
+
+    it('session.error handler should log structured JSON error event', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const validConfig = {
+        topics: ['topic1'],
+        rules: [{ name: 'rule1', topic: 'topic1', agent: 'agent1' }],
+      };
+
+      vi.mocked(parseConfigV003).mockReturnValue(validConfig as never);
+      vi.mocked(startConsumer).mockResolvedValue(undefined);
+
+      const plugin = await getDefaultExport();
+      const result = await plugin(mockContext);
+
+      const handler = result['session.error']!;
+      const testError = new Error('opencode runtime crash');
+      handler(testError, 'session-abc-123');
+
+      expect(consoleSpy).toHaveBeenCalledTimes(1);
+      const loggedJson = consoleSpy.mock.calls[0][0] as string;
+      const parsed = JSON.parse(loggedJson);
+
+      expect(parsed.level).toBe('error');
+      expect(parsed.event).toBe('opencode_session_error');
+      expect(parsed.sessionId).toBe('session-abc-123');
+      expect(parsed.error).toBe('opencode runtime crash');
+      expect(parsed.stack).toBeDefined();
+      expect(parsed.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+      consoleSpy.mockRestore();
     });
   });
 
