@@ -14,7 +14,7 @@ import type { Producer, EachMessagePayload } from 'kafkajs';
 import { Kafka } from 'kafkajs';
 
 import { eachMessageHandler, performGracefulShutdown, startConsumer } from '../../src/kafka/consumer.js';
-import type { PluginConfigV003, RuleV003 } from '../../src/schemas/index.js';
+import type { RuleV003 } from '../../src/schemas/index.js';
 import type { IOpenCodeAgent } from '../../src/opencode/IOpenCodeAgent.js';
 import { createTestConfig, createTestRule } from '../unit/helpers/testConfig.js';
 

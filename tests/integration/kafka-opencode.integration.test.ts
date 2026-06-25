@@ -19,7 +19,6 @@ import type { Producer, EachMessagePayload } from 'kafkajs';
 import { Kafka } from 'kafkajs';
 
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
-import type { PluginConfigV003, RuleV003 } from '../../src/schemas/index.js';
 import { MockOpenCodeAgent } from '../../src/opencode/MockOpenCodeAgent.js';
 import { createTestConfig, createTestRule } from '../unit/helpers/testConfig.js';
 

@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
-import type { PluginConfigV003, RuleV003 } from '../../src/schemas/index.js';
+import type { PluginConfigV003 } from '../../src/schemas/index.js';
 import type { EachMessagePayload, Producer } from 'kafkajs';
 import type { IOpenCodeAgent } from '../../src/opencode/IOpenCodeAgent.js';
 import { createTestConfig, createTestRule } from './helpers/testConfig.js';

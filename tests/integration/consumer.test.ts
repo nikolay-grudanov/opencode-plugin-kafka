@@ -15,7 +15,6 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { Kafka, type Consumer, type Producer, type EachMessagePayload } from 'kafkajs';
 import { RedpandaContainer } from '@testcontainers/redpanda';
 import type { StartedTestContainer, StoppedTestContainer } from 'testcontainers';
-import type { PluginConfigV003 } from '../../src/schemas/index.js';
 import type { IOpenCodeAgent, AgentResult } from '../../src/opencode/IOpenCodeAgent.js';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
 import { waitFor, uniqueTopicId, uniqueGroupId, createTopics, safeStopConsumer } from './helpers/index.js';
