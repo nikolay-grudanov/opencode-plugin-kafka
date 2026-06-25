@@ -75,6 +75,55 @@ describe('session-watchers', () => {
       const watcher = registerSessionWatcher('sess-2', fakeRule, makeAbortController());
       expect(watcher.textCapture).toBeUndefined();
     });
+
+    it('saves Kafka context fields (spec-009 H3)', () => {
+      const abortController = makeAbortController();
+      const kafkaContext = {
+        kafkaMessageKey: 'msg-key-123',
+        kafkaTopic: 'input-topic',
+        kafkaPartition: 3,
+        kafkaOffset: '42',
+      };
+      const watcher = registerSessionWatcher('sess-kafka', fakeRule, abortController, kafkaContext);
+
+      expect(watcher.originalMessageKey).toBe('msg-key-123');
+      expect(watcher.originalTopic).toBe('input-topic');
+      expect(watcher.originalPartition).toBe(3);
+      expect(watcher.originalOffset).toBe('42');
+    });
+
+    it('defaults Kafka context fields when not provided', () => {
+      const abortController = makeAbortController();
+      const watcher = registerSessionWatcher('sess-no-kafka', fakeRule, abortController);
+
+      expect(watcher.originalMessageKey).toBeNull();
+      expect(watcher.originalTopic).toBe('');
+      expect(watcher.originalPartition).toBe(0);
+      expect(watcher.originalOffset).toBe('0');
+    });
+
+    it('handles null kafkaMessageKey', () => {
+      const abortController = makeAbortController();
+      const watcher = registerSessionWatcher('sess-null-key', fakeRule, abortController, {
+        kafkaMessageKey: null,
+        kafkaTopic: 'topic',
+        kafkaPartition: 1,
+        kafkaOffset: '10',
+      });
+
+      expect(watcher.originalMessageKey).toBeNull();
+    });
+
+    it('handles undefined kafkaMessageKey (defaults to null)', () => {
+      const abortController = makeAbortController();
+      const watcher = registerSessionWatcher('sess-undef-key', fakeRule, abortController, {
+        kafkaTopic: 'topic',
+        kafkaPartition: 1,
+        kafkaOffset: '10',
+      });
+
+      expect(watcher.originalMessageKey).toBeNull();
+    });
   });
 
   describe('getSessionWatcher', () => {

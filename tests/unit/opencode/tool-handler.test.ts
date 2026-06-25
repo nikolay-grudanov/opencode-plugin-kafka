@@ -166,6 +166,37 @@ describe('createSendToKafkaTool', () => {
     expect(result.metadata).toMatchObject({ error: true });
     expect((result as { output: string }).output).toContain('error');
   });
+
+  it('returns error when response is empty string', async () => {
+    const tool = createSendToKafkaTool(
+      { name: 'rule-empty', agentId: 'agent', responseTopic: 'topic' },
+      { producer: mockProducer }
+    );
+
+    const result = await tool.execute(
+      { response: '', sessionId: 's1' },
+      { sessionID: 's1', messageID: 'm', agent: 'a', directory: '/', worktree: '/', abort: new AbortController().signal, metadata: () => {}, ask: async () => {} }
+    );
+
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(result.metadata).toMatchObject({ error: true });
+    expect((result as { output: string }).output).toContain('error');
+  });
+
+  it('returns error when responseTopic undefined and rule.responseTopic undefined', async () => {
+    const tool = createSendToKafkaTool(
+      { name: 'rule-both-undef', agentId: 'agent', responseTopic: undefined as unknown as string },
+      { producer: mockProducer }
+    );
+
+    const result = await tool.execute(
+      { response: 'hello' },
+      { sessionID: 's1', messageID: 'm', agent: 'a', directory: '/', worktree: '/', abort: new AbortController().signal, metadata: () => {}, ask: async () => {} }
+    );
+
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(result.metadata).toMatchObject({ error: true });
+  });
 });
 
 describe('buildAllTools', () => {
@@ -213,6 +244,23 @@ describe('buildAllTools', () => {
     );
 
     expect(Object.keys(tools)).toEqual(['send_to_kafka_rule_a']);
+    expect(consoleWarnSpy).toHaveBeenCalled();
+    const warnLog = consoleWarnSpy.mock.calls.map(c => c[0]).join('\n');
+    expect(warnLog).toContain('tool_name_collision');
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('logs warning for name collision in buildAllTools', () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    buildAllTools(
+      [
+        { name: 'rule-x', agentId: 'a', responseTopic: 't1' },
+        { name: 'rule_x', agentId: 'b', responseTopic: 't2' },
+      ],
+      { producer: mockProducer }
+    );
+
+    // Should log warning about collision
     expect(consoleWarnSpy).toHaveBeenCalled();
     consoleWarnSpy.mockRestore();
   });

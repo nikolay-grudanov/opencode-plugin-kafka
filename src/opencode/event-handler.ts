@@ -179,15 +179,16 @@ async function handleSessionIdle(
 
   // Tool not called and no fallback — DLQ if required
   if (rule.requireToolCall) {
+    // H3: Используем Kafka context из watcher для DLQ envelope
     try {
       await sendToDlq(
         deps.dlqProducer,
         {
           value: null,
-          topic: rule.responseTopic ?? 'unknown',
-          partition: 0,
-          offset: '0',
-          originalKey: null,
+          topic: (watcher.originalTopic || rule.responseTopic) ?? 'unknown',
+          partition: watcher.originalPartition,
+          offset: watcher.originalOffset,
+          originalKey: watcher.originalMessageKey,
         },
         new Error(
           `session idle without tool call: sessionId=${sessionId}, ruleName=${rule.name}, duration=${sessionDurationMs}ms`
@@ -283,15 +284,16 @@ export function startMaxSessionGuard(
       const elapsed = now - watcher.startTime;
       if (elapsed > rule.maxSessionMs && !watcher.toolCalled) {
         // Session exceeded maxSessionMs without tool call — force DLQ
+        // H3: Используем Kafka context из watcher для DLQ envelope
         // Fire-and-forget — don't await to keep interval tick fast
         sendToDlq(
           deps.dlqProducer,
           {
             value: null,
-            topic: rule.responseTopic ?? 'unknown',
-            partition: 0,
-            offset: '0',
-            originalKey: null,
+topic: (watcher.originalTopic || rule.responseTopic) ?? 'unknown',
+            partition: watcher.originalPartition,
+            offset: watcher.originalOffset,
+            originalKey: watcher.originalMessageKey,
           },
           new Error(
             `session exceeded maxSessionMs (${rule.maxSessionMs}) without tool call: ` +

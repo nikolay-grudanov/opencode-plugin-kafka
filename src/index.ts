@@ -73,19 +73,7 @@ export default async function plugin(context: PluginContext): Promise<PluginHook
     const adapterMode = toggles.pollingFallback ? 'polling' : 'tool-based';
     const agent = new OpenCodeAgentAdapter(context.client, adapterMode);
 
-    // 4. Запускаем Kafka consumer в фоне
-    startConsumer(config, agent).catch((error) => {
-      console.error(
-        JSON.stringify({
-          level: 'error',
-          event: 'consumer_start_failed',
-          error: error instanceof Error ? error.message : String(error),
-          timestamp: new Date().toISOString(),
-        })
-      );
-    });
-
-    // 5. Строим Hooks объект согласно toggles (FR-T1)
+    // 4. Строим Hooks объект согласно toggles (FR-T1)
     const hooks: Record<string, unknown> = {
       'session.error': handleSessionError,
     };
@@ -134,6 +122,19 @@ export default async function plugin(context: PluginContext): Promise<PluginHook
         })
       );
     }
+
+    // 5. M3: Запускаем Kafka consumer ПОСЛЕ построения hooks (чтобы избежать race condition)
+    // Consumer может начать обрабатывать сообщения только после регистрации tools/events
+    startConsumer(config, agent).catch((error) => {
+      console.error(
+        JSON.stringify({
+          level: 'error',
+          event: 'consumer_start_failed',
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        })
+      );
+    });
 
     return hooks as unknown as PluginHooks;
   } catch (error) {

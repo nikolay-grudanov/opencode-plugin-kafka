@@ -42,6 +42,9 @@ jobs:
 
       - name: Wait for Kafka ready (up to 90s)
         run: |
+          # Healthcheck выполняется ВНУТРИ контейнера через podman exec,
+          # поэтому используется внутренний порт 9092. Consumer использует
+          # внешний порт 9093 через проброс портов docker/podman.
           for i in $(seq 1 18); do
             if podman exec opencode-kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
               echo "Kafka ready after ${i}*5s"

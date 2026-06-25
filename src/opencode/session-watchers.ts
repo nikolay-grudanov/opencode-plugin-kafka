@@ -32,6 +32,14 @@ export interface SessionWatcher {
   textCapture: string | undefined;
   /** AbortController for cleanup on shutdown. */
   abortController: AbortController;
+  /** H3: Оригинальный Kafka message key (для DLQ envelope). */
+  originalMessageKey: string | null;
+  /** H3: Оригинальный Kafka topic (для DLQ envelope). */
+  originalTopic: string;
+  /** H3: Оригинальный Kafka partition (для DLQ envelope). */
+  originalPartition: number;
+  /** H3: Оригинальный Kafka offset (для DLQ envelope). */
+  originalOffset: string;
 }
 
 /**
@@ -43,14 +51,35 @@ export interface SessionWatcher {
 const watchers = new Map<string, SessionWatcher>();
 
 /**
+ * Optional Kafka message context for SessionWatcher.
+ * Used for DLQ envelope correlation (H3).
+ */
+export interface SessionWatcherKafkaContext {
+  /** Kafka message key */
+  kafkaMessageKey?: string | null;
+  /** Kafka topic */
+  kafkaTopic?: string;
+  /** Kafka partition */
+  kafkaPartition?: number;
+  /** Kafka offset */
+  kafkaOffset?: string;
+}
+
+/**
  * Register a new session watcher. Idempotent: if a watcher already exists
  * for the sessionId (which would be a bug — same sessionID reused), the
  * existing one is overwritten and a console.warn is logged.
+ *
+ * @param sessionId - OpenCode session ID
+ * @param matchedRule - Matched rule (name, agentId, responseTopic)
+ * @param abortController - AbortController for cleanup
+ * @param kafkaContext - Optional Kafka message context for DLQ envelope (H3)
  */
 export function registerSessionWatcher(
   sessionId: string,
   matchedRule: Pick<RuleV003, 'name' | 'agentId' | 'responseTopic'>,
-  abortController: AbortController
+  abortController: AbortController,
+  kafkaContext?: SessionWatcherKafkaContext
 ): SessionWatcher {
   if (watchers.has(sessionId)) {
     // Should never happen — OpenCode session IDs are unique. Log and overwrite.
@@ -73,6 +102,11 @@ export function registerSessionWatcher(
     toolCalled: false,
     textCapture: undefined,
     abortController,
+    // H3: Сохраняем Kafka context для DLQ envelope
+    originalMessageKey: kafkaContext?.kafkaMessageKey ?? null,
+    originalTopic: kafkaContext?.kafkaTopic ?? '',
+    originalPartition: kafkaContext?.kafkaPartition ?? 0,
+    originalOffset: kafkaContext?.kafkaOffset ?? '0',
   };
 
   watchers.set(sessionId, watcher);

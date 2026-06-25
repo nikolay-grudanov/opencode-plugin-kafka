@@ -91,6 +91,15 @@ describe('AgentError', () => {
     expect(error.originalError?.message).toBe('SDK connection refused');
   });
 
+  it('getOriginalErrorMessage возвращает message когда originalError это Error', () => {
+    const original = new Error('SDK connection refused');
+    const error = new AgentError('Agent invocation failed', original);
+
+    // Вызываем getOriginalErrorMessage() для покрытия instanceof Error branch
+    const msg = error.getOriginalErrorMessage();
+    expect(msg).toBe('SDK connection refused');
+  });
+
   it('имеет undefined originalError когда не передан', () => {
     const error = new AgentError('Agent failed without cause');
 

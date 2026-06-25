@@ -165,22 +165,28 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
     prompt: string,
     agentId: string,
     sessionId: string,
-    _options: InvokeOptions,
+    options: InvokeOptions,
     startTime: number
   ): Promise<AgentResult> {
-    // Note: _options is unused in tool-based mode. The AbortSignal in
-    // options is captured into the SessionWatcher's abortController for
+    // C1: Используем ruleName и responseTopic из options для корректной привязки к matched rule.
+    // AbortSignal в options captured into the SessionWatcher's abortController for
     // event-handler to propagate shutdown. The outer `invoke()` already
     // checked options.signal.aborted before reaching here.
     // Register SessionWatcher so the event-handler (Phase 4) can track
     // whether the tool was called and send to DLQ if not.
     const abortController = new AbortController();
     const ruleStub: Pick<RuleV003, 'name' | 'agentId' | 'responseTopic'> = {
-      name: agentId, // best-effort: agentId used as ruleName fallback
+      name: options.ruleName ?? agentId, // C1: fallback на agentId если ruleName не передан
       agentId,
-      responseTopic: undefined,
+      responseTopic: options.responseTopic, // C1: берём из options, не undefined
     };
-    registerSessionWatcher(sessionId, ruleStub, abortController);
+    // H3: Передаём Kafka message context для DLQ envelope
+    registerSessionWatcher(sessionId, ruleStub, abortController, {
+      kafkaMessageKey: options.kafkaMessageKey,
+      kafkaTopic: options.kafkaTopic,
+      kafkaPartition: options.kafkaPartition,
+      kafkaOffset: options.kafkaOffset,
+    });
 
     // Send prompt. session.prompt() returns immediately with
     // {data: undefined} for streaming responses — that's OK, the tool

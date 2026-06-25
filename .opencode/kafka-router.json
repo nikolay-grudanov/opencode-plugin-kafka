@@ -14,7 +14,7 @@
       "requireToolCall": true,
       "fallbackToTextCapture": false,
       "safetyNetTimeoutMs": 60000,
-      "maxSessionMs": 300000
+      "maxSessionMs": 180000
     }
   ],
   "toggles": {

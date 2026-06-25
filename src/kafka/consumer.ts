@@ -15,6 +15,7 @@ import { sendToDlq } from './dlq.js';
 import { createKafkaClient, createConsumer, createDlqProducer, createResponseProducer } from './client.js';
 import { sendResponse } from './response-producer.js';
 import type { IOpenCodeAgent, AgentResult } from '../opencode/IOpenCodeAgent.js';
+import { stopMaxSessionGuard } from '../opencode/event-handler.js';
 
 /**
  * Максимальный размер сообщения (1MB по умолчанию для KafkaJS).
@@ -415,6 +416,8 @@ export async function eachMessageHandler(
     );
 
     // 7. Вызываем OpenCode агента (C2: AbortController для реальной отмены)
+    // C1: Передаём ruleName и responseTopic для корректной привязки к matched rule
+    // H3: Передаём Kafka message context для DLQ envelope
     const abortController = new AbortController();
     activeSessions?.add(abortController);
 
@@ -423,6 +426,12 @@ export async function eachMessageHandler(
       agentResult = await agent.invoke(prompt, matchedRule.agentId, {
         timeoutMs: matchedRule.timeoutMs ?? 120_000,
         signal: abortController.signal,
+        ruleName: matchedRule.name,
+        responseTopic: matchedRule.responseTopic,
+        kafkaMessageKey: payload.message.key?.toString() ?? null,
+        kafkaTopic: payload.topic,
+        kafkaPartition: payload.partition,
+        kafkaOffset: payload.message.offset,
       });
     } finally {
       activeSessions?.delete(abortController); // гарантированная очистка во всех путях
@@ -577,6 +586,13 @@ export async function performGracefulShutdown(
       timestamp: new Date().toISOString(),
     }),
   );
+
+  // C2: Останавливаем maxSession guard interval перед abort sessions
+  try {
+    stopMaxSessionGuard();
+  } catch {
+    // Best-effort — игнорируем ошибки остановки
+  }
 
   const startTime = Date.now();
 
