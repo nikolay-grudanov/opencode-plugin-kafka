@@ -33,7 +33,10 @@ import { kafkaEnvSchema, type KafkaEnv } from '../schemas/index.js';
  * const { kafka, validatedEnv } = createKafkaClient(process.env);
  * ```
  */
-export function createKafkaClient(env: NodeJS.ProcessEnv): { kafka: Kafka; validatedEnv: KafkaEnv } {
+export function createKafkaClient(env: NodeJS.ProcessEnv): {
+  kafka: Kafka;
+  validatedEnv: KafkaEnv;
+} {
   // Валидируем переменные окружения через Zod schema
   // Zod выбросит Error с указанием missing field name
   const validatedEnv = kafkaEnvSchema.parse(env);
@@ -56,7 +59,10 @@ export function createKafkaClient(env: NodeJS.ProcessEnv): { kafka: Kafka; valid
   // Configures SASL if KAFKA_USERNAME + KAFKA_PASSWORD set
   if (validatedEnv.KAFKA_USERNAME && validatedEnv.KAFKA_PASSWORD) {
     const saslConfig: SASLOptions = {
-      mechanism: (validatedEnv.KAFKA_SASL_MECHANISM || 'plain') as 'plain' | 'scram-sha-256' | 'scram-sha-512',
+      mechanism: (validatedEnv.KAFKA_SASL_MECHANISM || 'plain') as
+        | 'plain'
+        | 'scram-sha-256'
+        | 'scram-sha-512',
       username: validatedEnv.KAFKA_USERNAME,
       password: validatedEnv.KAFKA_PASSWORD,
     };

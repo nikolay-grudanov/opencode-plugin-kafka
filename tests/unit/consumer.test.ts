@@ -1,13 +1,36 @@
-/**
- * Unit tests for eachMessageHandler
- * @fileoverview Tests for sequential message processing with DLQ support
- */
-
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { eachMessageHandler, logDlqRate, logConsumerLagMetrics, isBrokerThrottleError, executeWithThrottleRetry } from '../../src/kafka/consumer.js';
 import type { PluginConfigV003, RuleV003 } from '../../src/schemas/index.js';
-import type { Producer } from 'kafkajs';
+import type { Producer, Consumer, EachMessagePayload } from 'kafkajs';
 import type { IOpenCodeAgent, AgentResult } from '../../src/opencode/IOpenCodeAgent.js';
+import { mockConsumer, mockProducer, mockPayload } from './helpers/mockFactories.js';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _ = mockConsumer || mockProducer || mockPayload;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _mockConsumer = mockConsumer;
+
+/** Helper function для создания EachMessagePayload моков */
+function createPayload(topic: string, value: Buffer | null, partition = 0, offset = '0'): EachMessagePayload {
+  return {
+    topic,
+    partition,
+    message: { key: null, value, offset, timestamp: '', size: 0, attributes: 0, headers: {} },
+    heartbeat: vi.fn(),
+    pause: vi.fn(),
+  } as unknown as EachMessagePayload;
+}
+
+/** Helper для создания payload с полным контролем */
+function makePayload(topic: string, value: Buffer | null, opts: { offset?: string; partition?: number; timestamp?: string } = {}): EachMessagePayload {
+  const { offset = '0', partition = 0, timestamp = '2024-04-22T00:00:00.000Z' } = opts;
+  return {
+    topic,
+    partition,
+    message: { key: null, value, offset, timestamp, size: 0, attributes: 0, headers: {} },
+    heartbeat: vi.fn(),
+    pause: vi.fn(),
+  } as unknown as EachMessagePayload;
+}
 
 /**
  * Mock состояние consumer для тестов (Constitution Principle IV: No-State Consumer)
@@ -26,6 +49,16 @@ vi.mock('../../src/kafka/dlq.js', () => ({
 
 // Import mocked module
 import { sendToDlq } from '../../src/kafka/dlq.js';
+
+// Базовый RuleV003 для тестов (категория A)
+const baseRuleV003: RuleV003 = {
+  name: 'test-rule',
+  jsonPath: '$.test',
+  promptTemplate: 'Process: ${$}',
+  agentId: 'test-agent',
+  timeoutMs: 30000,
+  concurrency: 1,
+};
 
 describe('eachMessageHandler', () => {
   let mockDlqProducer: Producer;
@@ -74,11 +107,7 @@ describe('eachMessageHandler', () => {
 
     // Setup config with one matching rule
     rules = [
-      {
-        name: 'test-rule',
-        jsonPath: '$.test',
-        promptTemplate: 'Process: ${$}',
-      },
+      { ...baseRuleV003, name: 'test-rule' },
     ];
 
     mockConfig = {
@@ -96,17 +125,7 @@ describe('eachMessageHandler', () => {
 
   describe('Valid JSON passes parsing', () => {
     it('должен успешно обработать валидный JSON', async () => {
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('{"test": "value"}'),
-          offset: '0',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', Buffer.from('{"test": "value"}'));
 
       await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -133,7 +152,7 @@ describe('eachMessageHandler', () => {
           headers: {},
           timestamp: '2024-04-22T00:00:00.000Z',
         },
-      };
+      } as unknown as EachMessagePayload;
 
       await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -162,7 +181,7 @@ describe('eachMessageHandler', () => {
           headers: {},
           timestamp: '2024-04-22T00:00:00.000Z',
         },
-      };
+      } as unknown as EachMessagePayload;
 
       await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -189,7 +208,7 @@ describe('eachMessageHandler', () => {
           headers: {},
           timestamp: '2024-04-22T00:00:00.000Z',
         },
-      };
+      } as unknown as EachMessagePayload;
 
       await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -218,7 +237,7 @@ describe('eachMessageHandler', () => {
           headers: {},
           timestamp: '2024-04-22T00:00:00.000Z',
         },
-      };
+      } as unknown as EachMessagePayload;
 
       // Этот тест фокусируется на проверке размера, поэтому мы игнорируем ошибку JSON parse
       await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
@@ -239,17 +258,7 @@ describe('eachMessageHandler', () => {
         throw new Error('matchRuleV003 error');
       });
 
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('{"test": "value"}'),
-          offset: '0',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', Buffer.from('{"test": "value"}'));
 
       await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -268,17 +277,7 @@ describe('eachMessageHandler', () => {
         throw new Error('Commit failed');
       });
 
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('{"test": "value"}'),
-          offset: '0',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', Buffer.from('{"test": "value"}'));
 
       await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -296,17 +295,7 @@ describe('eachMessageHandler', () => {
         throw 'String error instead of Error object';
       });
 
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('{"test": "value"}'),
-          offset: '0',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', Buffer.from('{"test": "value"}'));
 
       await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -324,25 +313,11 @@ describe('eachMessageHandler', () => {
     it('должен успешно обработать когда buildPromptV003 возвращает fallback', async () => {
       // Создаем правило, которое совпадет, но с placeholder для несуществующего поля
       rules = [
-        {
-          name: 'test-rule',
-          jsonPath: '$.test',
-          promptTemplate: 'Process: ${$.missing}', // Placeholder с несуществующим полем
-        },
+        { ...baseRuleV003, name: 'test-rule', jsonPath: '$.test', promptTemplate: 'Process: ${$.missing}' },
       ];
       mockConfig.rules = rules;
 
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('{"test": "value"}'),
-          offset: '0',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', Buffer.from('{"test": "value"}'));
 
       await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -366,7 +341,7 @@ describe('eachMessageHandler', () => {
 
   describe('No global state between invocations', () => {
     it('не должен сохранять состояние между вызовами', async () => {
-      const payloads = [
+      const payloads: EachMessagePayload[] = [
         {
           topic: 'test-topic',
           partition: 0,
@@ -376,6 +351,8 @@ describe('eachMessageHandler', () => {
             key: null,
             headers: {},
             timestamp: '2024-04-22T00:00:00.000Z',
+            size: 0,
+            attributes: 0,
           },
         },
         {
@@ -387,6 +364,8 @@ describe('eachMessageHandler', () => {
             key: null,
             headers: {},
             timestamp: '2024-04-22T00:00:00.000Z',
+            size: 0,
+            attributes: 0,
           },
         },
         {
@@ -398,9 +377,11 @@ describe('eachMessageHandler', () => {
             key: null,
             headers: {},
             timestamp: '2024-04-22T00:00:00.000Z',
+            size: 0,
+            attributes: 0,
           },
         },
-      ];
+      ] as unknown as EachMessagePayload[];
 
       // Обрабатываем все сообщения
       for (const payload of payloads) {
@@ -419,7 +400,7 @@ describe('eachMessageHandler', () => {
   });
 
   describe('Sequential processing', () => {
-    function createTestPayload(index: number) {
+    function createTestPayload(index: number): EachMessagePayload {
       return {
         topic: 'test-topic',
         partition: 0,
@@ -430,7 +411,7 @@ describe('eachMessageHandler', () => {
           headers: {},
           timestamp: '2024-04-22T00:00:00.000Z',
         },
-      };
+      } as unknown as EachMessagePayload;
     }
 
     it('должен обрабатывать сообщения последовательно (сообщения обрабатываются в правильном порядке)', async () => {
@@ -482,7 +463,7 @@ describe('eachMessageHandler', () => {
           headers: {},
           timestamp: '2024-04-22T00:00:00.000Z',
         },
-      };
+      } as unknown as EachMessagePayload;
 
       await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -500,25 +481,11 @@ describe('eachMessageHandler', () => {
     it('должен логировать "no rule matched" если ни одно правило не совпало', async () => {
       // Создаем правило, которое не совпадет с payload
       rules = [
-        {
-          name: 'non-matching-rule',
-          jsonPath: '$.nonexistent',
-          promptTemplate: 'Test',
-        },
+        { ...baseRuleV003, name: 'non-matching-rule', jsonPath: '$.nonexistent', promptTemplate: 'Test' },
       ];
       mockConfig.rules = rules;
 
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('{"test": "value"}'),
-          offset: '0',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', Buffer.from('{"test": "value"}'));
 
       await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -547,7 +514,7 @@ describe('eachMessageHandler', () => {
           headers: {},
           timestamp: '2024-04-22T00:00:00.000Z',
         },
-      };
+      } as unknown as EachMessagePayload;
 
       await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -680,7 +647,7 @@ describe('Helper functions', () => {
           headers: {},
           timestamp: '2024-04-22T00:00:00.000Z',
         },
-} as EachMessagePayload;
+      } as unknown as EachMessagePayload;
 
       logConsumerLagMetrics(payload);
 
@@ -857,11 +824,7 @@ describe('eachMessageHandler shutdown state', () => {
     activeSessions = new Set<AbortController>();
 
     const rules = [
-      {
-        name: 'test-rule',
-        jsonPath: '$.test',
-        promptTemplate: 'Process: ${$}',
-      },
+      { ...baseRuleV003, name: 'test-rule' },
     ];
 
     mockConfig = {
@@ -877,17 +840,7 @@ describe('eachMessageHandler shutdown state', () => {
   });
 
   it('должен пропустить сообщение когда isShuttingDown === true', async () => {
-    const payload = {
-      topic: 'test-topic',
-      partition: 0,
-      message: {
-        value: Buffer.from('{"test": "value"}'),
-        offset: '0',
-        key: null,
-        headers: {},
-        timestamp: '2024-04-22T00:00:00.000Z',
-      },
-    };
+    const payload = makePayload('test-topic', Buffer.from('{"test": "value"}'));
 
     await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -908,17 +861,7 @@ describe('eachMessageHandler shutdown state', () => {
   it('должен корректно обрабатывать isShuttingDown = false (нормальный flow)', async () => {
     mockState.isShuttingDown = false;
 
-    const payload = {
-      topic: 'test-topic',
-      partition: 0,
-      message: {
-        value: Buffer.from('{"test": "value"}'),
-        offset: '0',
-        key: null,
-        headers: {},
-        timestamp: '2024-04-22T00:00:00.000Z',
-      },
-    };
+    const payload = makePayload('test-topic', Buffer.from('{"test": "value"}'));
 
     await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -983,7 +926,7 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
         jsonPath: '$.test',
         promptTemplate: 'Process: ${$}',
       },
-    ];
+    ] as unknown as RuleV003[];
 
     mockConfig = {
       topics: ['test-topic'],
@@ -1001,17 +944,7 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
   it('должен игнорировать tombstone когда KAFKA_IGNORE_TOMBSTONES=true', async () => {
     process.env.KAFKA_IGNORE_TOMBSTONES = 'true';
 
-    const payload = {
-      topic: 'test-topic',
-      partition: 0,
-      message: {
-        value: null, // Tombstone
-        offset: '0',
-        key: null,
-        headers: {},
-        timestamp: '2024-04-22T00:00:00.000Z',
-      },
-    };
+    const payload = makePayload('test-topic', null); // null = Tombstone
 
     await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -1032,17 +965,7 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
   it('должен отправлять tombstone в DLQ когда KAFKA_IGNORE_TOMBSTONES=false', async () => {
     process.env.KAFKA_IGNORE_TOMBSTONES = 'false';
 
-    const payload = {
-      topic: 'test-topic',
-      partition: 0,
-      message: {
-        value: null, // Tombstone
-        offset: '0',
-        key: null,
-        headers: {},
-        timestamp: '2024-04-22T00:00:00.000Z',
-      },
-    };
+    const payload = makePayload('test-topic', null); // null = Tombstone
 
     await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -1054,17 +977,7 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
     // KAFKA_IGNORE_TOMBSTONES не установлен
     delete process.env.KAFKA_IGNORE_TOMBSTONES;
 
-    const payload = {
-      topic: 'test-topic',
-      partition: 0,
-      message: {
-        value: null, // Tombstone
-        offset: '0',
-        key: null,
-        headers: {},
-        timestamp: '2024-04-22T00:00:00.000Z',
-      },
-    };
+    const payload = makePayload('test-topic', null); // null = Tombstone
 
     await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
@@ -1079,9 +992,9 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
 describe('performGracefulShutdown', () => {
   // Импортируем после моков
   let performGracefulShutdown: typeof import('../../src/kafka/consumer.js').performGracefulShutdown;
-  let mockConsumer: { disconnect: ReturnType<typeof vi.fn> };
-  let mockDlqProducer: { disconnect: ReturnType<typeof vi.fn> };
-  let mockResponseProducer: { disconnect: ReturnType<typeof vi.fn> };
+  let mockConsumer: Consumer;
+  let mockDlqProducer: Producer;
+  let mockResponseProducer: Producer;
   let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
@@ -1094,7 +1007,7 @@ describe('performGracefulShutdown', () => {
 
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    processExitSpy = vi.spyOn(process, 'exit').mockImplementation(vi.fn());
+    processExitSpy = vi.spyOn(process, 'exit').mockReturnValue(undefined as unknown as never) as unknown as ReturnType<typeof vi.spyOn>;
 
     // Mock для exitFn параметра
     mockExit = vi.fn() as unknown as (code: number) => never;
@@ -1109,15 +1022,15 @@ describe('performGracefulShutdown', () => {
     // Мокаем consumer и producers
     mockConsumer = {
       disconnect: vi.fn().mockResolvedValue(undefined),
-    };
+    } as unknown as Consumer;
 
     mockDlqProducer = {
       disconnect: vi.fn().mockResolvedValue(undefined),
-    };
+    } as unknown as Producer;
 
     mockResponseProducer = {
       disconnect: vi.fn().mockResolvedValue(undefined),
-    };
+    } as unknown as Producer;
 
     // Динамический импорт чтобы подхватить моки
     const consumerModule = await import('../../src/kafka/consumer.js');
@@ -1153,6 +1066,7 @@ describe('performGracefulShutdown', () => {
   });
 
   it('должен продолжить producer disconnect если consumer disconnect падает', async () => {
+    // @ts-expect-error - vitest mock typing edge case
     mockConsumer.disconnect.mockRejectedValueOnce(new Error('Consumer disconnect failed'));
 
     await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
@@ -1171,6 +1085,7 @@ describe('performGracefulShutdown', () => {
   });
 
   it('должен завершить shutdown если producer disconnect падает', async () => {
+    // @ts-expect-error - vitest mock typing edge case
     mockDlqProducer.disconnect.mockRejectedValueOnce(new Error('Producer disconnect failed'));
 
     await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
@@ -1189,7 +1104,9 @@ describe('performGracefulShutdown', () => {
 
   it('должен завершить shutdown если responseProducer disconnect падает', async () => {
     // DLQ успешен, но responseProducer падает
+    // @ts-expect-error - vitest mock typing edge case
     mockDlqProducer.disconnect.mockResolvedValueOnce(undefined);
+    // @ts-expect-error - vitest mock typing edge case
     mockResponseProducer.disconnect.mockRejectedValueOnce(new Error('Response producer disconnect failed'));
 
     await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
@@ -1207,7 +1124,9 @@ describe('performGracefulShutdown', () => {
   });
 
   it('должен корректно обработать string error в responseProducer.disconnect', async () => {
+    // @ts-expect-error - vitest mock typing edge case
     mockDlqProducer.disconnect.mockResolvedValueOnce(undefined);
+    // @ts-expect-error - vitest mock typing edge case
     mockResponseProducer.disconnect.mockRejectedValueOnce('String error not an Error object');
 
     await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
@@ -1241,6 +1160,7 @@ describe('performGracefulShutdown', () => {
   it('должен выйти с кодом 1 при timeout', async () => {
     vi.useFakeTimers();
 
+    // @ts-expect-error - vitest mock typing edge case
     mockConsumer.disconnect.mockImplementation(
       () => new Promise((resolve) => setTimeout(resolve, 20_000)), // долгий disconnect
     );
@@ -1266,6 +1186,7 @@ describe('performGracefulShutdown', () => {
 
   it('должен корректно обработать не-Error в consumer.disconnect error', async () => {
     // Мокаем disconnect чтобы выбросил строку вместо Error
+    // @ts-expect-error - vitest mock typing edge case
     mockConsumer.disconnect.mockRejectedValueOnce('String error not an Error object');
 
     await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
@@ -1278,6 +1199,7 @@ describe('performGracefulShutdown', () => {
 
   it('должен корректно обработать не-Error в producer.disconnect error', async () => {
     // Мокаем consumer disconnect успешным, а producer - строкой вместо Error
+    // @ts-expect-error - vitest mock typing edge case
     mockDlqProducer.disconnect.mockRejectedValueOnce('String producer error not an Error object');
 
     await performGracefulShutdown(mockConsumer, mockDlqProducer, mockResponseProducer, 'SIGTERM', mockState);
@@ -1294,6 +1216,7 @@ describe('performGracefulShutdown', () => {
     vi.useFakeTimers();
 
     // Мокаем consumer.disconnect который永远不会 завершается (зависает)
+    // @ts-expect-error - vitest mock typing edge case
     mockConsumer.disconnect.mockImplementation(
       () => new Promise((_, reject) => setTimeout(() => reject('Timeout as string'), 20_000)),
     );
@@ -1361,7 +1284,7 @@ describe('startConsumer', () => {
         jsonPath: '$.test',
         promptTemplate: 'Process: ${$}',
       },
-    ],
+    ] as unknown as RuleV003[],
   };
 
   beforeEach(async () => {
@@ -1369,7 +1292,7 @@ describe('startConsumer', () => {
 
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    processExitSpy = vi.spyOn(process, 'exit').mockImplementation(vi.fn());
+    processExitSpy = vi.spyOn(process, 'exit').mockReturnValue(undefined as unknown as never) as unknown as ReturnType<typeof vi.spyOn>;
 
     // Мокаем process.once для SIGTERM/SIGINT
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1382,7 +1305,7 @@ describe('startConsumer', () => {
         (process as any)._savedHandlers[event] = handler;
       }
       return process;
-    });
+    }) as any;
 
     // Mock agent
     mockAgent = {
@@ -1417,17 +1340,17 @@ describe('startConsumer', () => {
       send: vi.fn().mockResolvedValue(undefined),
     };
 
-    mockKafka = {};
+    mockKafka = {} as any;
 
     // Настраиваем моки модуля client.js
     const clientModule = await import('../../src/kafka/client.js');
     vi.mocked(clientModule.createKafkaClient).mockReturnValue({
       kafka: mockKafka,
       validatedEnv: { KAFKA_BROKERS: 'localhost:9092', KAFKA_GROUP_ID: 'test-group' },
-    });
-    vi.mocked(clientModule.createConsumer).mockReturnValue(mockConsumer);
-    vi.mocked(clientModule.createDlqProducer).mockReturnValue(mockDlqProducer);
-    vi.mocked(clientModule.createResponseProducer).mockReturnValue(mockResponseProducer);
+    } as any);
+    vi.mocked(clientModule.createConsumer).mockReturnValue(mockConsumer as any);
+    vi.mocked(clientModule.createDlqProducer).mockReturnValue(mockDlqProducer as any);
+    vi.mocked(clientModule.createResponseProducer).mockReturnValue(mockResponseProducer as any);
 
     const consumerModule = await import('../../src/kafka/consumer.js');
     startConsumer = consumerModule.startConsumer;
@@ -1647,10 +1570,10 @@ describe('agent invoke integration', () => {
 
   const createConfigWithRules = (rules: RuleV003[]): PluginConfigV003 => ({
     topics: ['test-topic'],
-    rules,
-  });
+    rules: rules,
+  } as unknown as PluginConfigV003);
 
-  const createPayload = (value: Record<string, unknown>, partition = 0, offset = '0') => ({
+  const createPayload = (value: Record<string, unknown>, partition = 0, offset = '0'): EachMessagePayload => ({
     topic: 'test-topic',
     partition,
     message: {
@@ -1659,8 +1582,10 @@ describe('agent invoke integration', () => {
       key: null,
       headers: {},
       timestamp: '2024-04-22T00:00:00.000Z',
+      size: 0,
+      attributes: 0,
     },
-  });
+  } as unknown as EachMessagePayload);
 
   beforeEach(() => {
     mockDlqProducer = {} as Producer;
@@ -1718,6 +1643,7 @@ describe('agent invoke integration', () => {
       agentId: 'test-agent',
       responseTopic: 'response-topic',
       timeoutMs: 120_000,
+      concurrency: 1,
     }]);
 
     const payload = createPayload({ type: 'test' });
@@ -1743,8 +1669,8 @@ describe('agent invoke integration', () => {
       jsonPath: '$.type',
       promptTemplate: 'Process: ${$.type}',
       agentId: 'test-agent',
-      // Нет responseTopic
       timeoutMs: 120_000,
+      concurrency: 1,
     }]);
 
     const payload = createPayload({ type: 'test' });
@@ -1772,6 +1698,7 @@ describe('agent invoke integration', () => {
       agentId: 'test-agent',
       responseTopic: 'response-topic',
       timeoutMs: 120_000,
+      concurrency: 1,
     }]);
 
     const payload = createPayload({ type: 'test' });
@@ -1800,6 +1727,7 @@ describe('agent invoke integration', () => {
       agentId: 'test-agent',
       responseTopic: 'response-topic',
       timeoutMs: 120_000,
+      concurrency: 1,
     }]);
 
     const payload = createPayload({ type: 'test' });
@@ -1821,6 +1749,7 @@ describe('agent invoke integration', () => {
       agentId: 'test-agent',
       responseTopic: 'response-topic',
       timeoutMs: 120_000,
+      concurrency: 1,
     }]);
 
     const payload = createPayload({ type: 'test' });
@@ -1850,6 +1779,7 @@ describe('agent invoke integration', () => {
       agentId: 'test-agent',
       responseTopic: 'response-topic',
       timeoutMs: 120_000,
+      concurrency: 1,
     }]);
 
     const payload = createPayload({ type: 'test' });
@@ -1870,6 +1800,7 @@ describe('agent invoke integration', () => {
       agentId: 'test-agent',
       responseTopic: 'response-topic',
       timeoutMs: 120_000,
+      concurrency: 1,
     }]);
 
     const payload = createPayload({ type: 'test' });
@@ -1886,9 +1817,9 @@ describe('agent invoke integration', () => {
  */
 describe('graceful shutdown (FR-016)', () => {
   let performGracefulShutdown: typeof import('../../src/kafka/consumer.js').performGracefulShutdown;
-  let mockConsumer: { disconnect: ReturnType<typeof vi.fn> };
-  let mockDlqProducer: { disconnect: ReturnType<typeof vi.fn> };
-  let mockResponseProducer: { disconnect: ReturnType<typeof vi.fn> };
+  let mockConsumer: Consumer;
+  let mockDlqProducer: Producer;
+  let mockResponseProducer: Producer;
   let mockState: { isShuttingDown: boolean; totalMessagesProcessed: number; dlqMessagesCount: number; lastDlqRateLogTime: number };
   let mockAgent: IOpenCodeAgent;
   let activeSessions: Set<AbortController>;
@@ -1932,15 +1863,15 @@ describe('graceful shutdown (FR-016)', () => {
     // Мокаем consumer и producers
     mockConsumer = {
       disconnect: vi.fn().mockResolvedValue(undefined),
-    };
+    } as unknown as Consumer;
 
     mockDlqProducer = {
       disconnect: vi.fn().mockResolvedValue(undefined),
-    };
+    } as unknown as Producer;
 
     mockResponseProducer = {
       disconnect: vi.fn().mockResolvedValue(undefined),
-    };
+    } as unknown as Producer;
 
     // Динамический импорт чтобы подхватить моки
     const consumerModule = await import('../../src/kafka/consumer.js');
@@ -2016,7 +1947,7 @@ describe('graceful shutdown (FR-016)', () => {
       'SIGTERM',
       mockState,
       mockExit,
-      activeSessions,
+      activeSessions as any,
     );
 
     // C2: AbortController.abort() не бросает - просто проверяем что disconnect вызван
@@ -2057,6 +1988,7 @@ describe('graceful shutdown (FR-016)', () => {
     vi.useFakeTimers();
 
     // Мокаем медленный disconnect
+    // @ts-expect-error - vitest mock typing edge case
     mockConsumer.disconnect.mockImplementation(
       () => new Promise((resolve) => setTimeout(resolve, 20_000)),
     );
@@ -2093,7 +2025,7 @@ describe('graceful shutdown (FR-016)', () => {
     vi.useFakeTimers();
 
     // Мокаем медленный disconnect
-    mockConsumer.disconnect.mockImplementation(
+    (mockConsumer.disconnect as any).mockImplementation(
       () => new Promise((resolve) => setTimeout(resolve, 20_000)),
     );
 
@@ -2164,9 +2096,9 @@ describe('DLQ error handling (FR-015)', () => {
   const createConfigWithRules = (rules: RuleV003[]): PluginConfigV003 => ({
     topics: ['test-topic'],
     rules,
-  });
+  } as PluginConfigV003);
 
-  const createPayload = (value: Record<string, unknown>, partition = 0, offset = '0') => ({
+  const createPayload = (value: Record<string, unknown>, partition = 0, offset = '0'): EachMessagePayload => ({
     topic: 'test-topic',
     partition,
     message: {
@@ -2175,8 +2107,10 @@ describe('DLQ error handling (FR-015)', () => {
       key: null,
       headers: {},
       timestamp: '2024-04-22T00:00:00.000Z',
+      size: 0,
+      attributes: 0,
     },
-  });
+  } as unknown as EachMessagePayload);
 
   beforeEach(() => {
     mockDlqProducer = {} as Producer;
@@ -2208,18 +2142,21 @@ describe('DLQ error handling (FR-015)', () => {
 
     activeSessions = new Set<AbortController>();
 
-    const rules = [
+    const rules: RuleV003[] = [
       {
         name: 'test-rule',
         jsonPath: '$.test',
         promptTemplate: 'Process: ${$}',
+        agentId: 'test-agent',
+        timeoutMs: 30000,
+        concurrency: 1,
       },
     ];
 
     mockConfig = {
       topics: ['test-topic'],
       rules: rules,
-    };
+    } as unknown as PluginConfigV003;
 
     vi.clearAllMocks();
   });
@@ -2238,7 +2175,7 @@ it('should send to DLQ with correct args on parse error', async () => {
       },
     };
 
-    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+    await eachMessageHandler(payload as any, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
     // Verify sendToDlq was called with correct payload metadata
     expect(sendToDlq).toHaveBeenCalledTimes(1);
@@ -2262,6 +2199,7 @@ it('should send to DLQ with correct args on parse error', async () => {
       agentId: 'test-agent',
       responseTopic: 'response-topic',
       timeoutMs: 120_000,
+      concurrency: 1,
     }]);
 
     // Mock agent to return timeout result
@@ -2299,6 +2237,7 @@ it('should send to DLQ with correct args on parse error', async () => {
       agentId: 'test-agent',
       responseTopic: 'response-topic',
       timeoutMs: 120_000,
+      concurrency: 1,
     }]);
 
     // Mock agent to return error result
@@ -2336,6 +2275,7 @@ it('should send to DLQ with correct args on parse error', async () => {
       agentId: 'test-agent',
       responseTopic: 'response-topic',
       timeoutMs: 120_000,
+      concurrency: 1,
     }]);
 
     // Mock agent to return timeout result
@@ -2373,6 +2313,7 @@ it('should send to DLQ with correct args on parse error', async () => {
       agentId: 'test-agent',
       responseTopic: 'response-topic',
       timeoutMs: 120_000,
+      concurrency: 1,
     }]);
 
     // Mock agent to return error result
@@ -2418,7 +2359,7 @@ it('should send to DLQ with correct args on parse error', async () => {
     // Mock sendToDlq to reject (resilience test - in reality it never throws)
     vi.mocked(sendToDlq).mockRejectedValueOnce(new Error('DLQ send failed'));
 
-    await eachMessageHandler(payload, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
+    await eachMessageHandler(payload as any, mockConfig, mockDlqProducer, mockCommitOffsets, mockState, mockAgent, mockResponseProducer, activeSessions);
 
     // Verify commitOffsets was called even though sendToDlq failed
     expect(mockCommitOffsets).toHaveBeenCalledTimes(1);
@@ -2436,6 +2377,7 @@ it('should send to DLQ with correct args on parse error', async () => {
       agentId: 'test-agent',
       responseTopic: 'response-topic',
       timeoutMs: 120_000,
+      concurrency: 1,
     }]);
 
     // Mock agent to return error to trigger DLQ path
@@ -2487,9 +2429,10 @@ it('should send to DLQ with correct args on parse error', async () => {
             promptTemplate: 'Process: ${$}',
             agentId: 'slow-agent',
             timeoutMs: 60000,
+            concurrency: 1,
           },
         ],
-      };
+      } as unknown as PluginConfigV003;
 
       const payload = {
         topic: 'test-topic',
@@ -2520,7 +2463,7 @@ it('should send to DLQ with correct args on parse error', async () => {
 
       // 3. Начинаем обработку сообщения (НЕ await - запускаем в фоне)
       const handlerPromise = eachMessageHandler(
-        payload,
+        payload as any,
         slowConfig,
         mockDlqProducer,
         mockCommitOffsets,
@@ -2597,7 +2540,7 @@ it('should send to DLQ with correct args on parse error', async () => {
       } as unknown as Producer;
 
       const errorHandlerPromise = eachMessageHandler(
-        errorPayload,
+        errorPayload as any,
         mockConfig,
         mockDlqProducer,
         mockCommitOffsets,

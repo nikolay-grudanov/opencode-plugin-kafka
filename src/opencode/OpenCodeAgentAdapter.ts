@@ -93,20 +93,52 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
    * @returns результат выполнения агента
    */
   async invoke(prompt: string, agentId: string, options: InvokeOptions): Promise<AgentResult> {
+    // Валидация входных параметров
+    if (!prompt?.trim()) {
+      return {
+        status: 'error',
+        errorMessage: 'Prompt cannot be empty',
+        sessionId: '',
+        executionTimeMs: 0,
+        timestamp: new Date().toISOString(),
+      };
+    }
+    if (!agentId?.trim()) {
+      return {
+        status: 'error',
+        errorMessage: 'Agent ID cannot be empty',
+        sessionId: '',
+        executionTimeMs: 0,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
     const startTime = Date.now();
     let sessionId = '';
 
     try {
       // 1. Создаём новую сессию
-      const session = await this.client.session.create({ body: { title: `kafka-plugin-${agentId}` } });
-      sessionId = session.id;
+      // hey-api wrapper возвращает { data: { id: ... }, error: null }
+      const session = await this.client.session.create({
+        body: { title: `kafka-plugin-${agentId}` },
+      });
+      sessionId = session.data?.id ?? '';
+      if (!sessionId) {
+        return {
+          status: 'error',
+          errorMessage: 'Empty session ID from SDK',
+          sessionId: '',
+          executionTimeMs: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
+        };
+      }
 
       // 2. Проверяем signal на early abort (C2)
       if (options.signal?.aborted) {
         throw new AgentError('Operation was aborted');
       }
 
-      if (this.mode === 'polling') {
+if (this.mode === 'polling') {
         // Legacy polling mode (spec-008 fallback) — blocks waiting for prompt response
         return await this.invokePolling(prompt, agentId, sessionId, options, startTime);
       }
@@ -256,7 +288,13 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
     }
 
     // Извлекаем текст из ответа
-    const parts = response?.parts ?? [];
+    const responseData = response as { parts?: Array<{ type?: string; text?: string }> } | undefined;
+    const rawParts = responseData?.parts ?? [];
+    // Приводим к MessagePart[]
+    const parts: Array<{ type: 'text'; text: string }> = rawParts.map((p) => ({
+      type: 'text',
+      text: p.text ?? '',
+    }));
     const responseText = extractResponseText(parts);
 
     return {
@@ -323,7 +361,10 @@ export class OpenCodeAgentAdapter implements IOpenCodeAgent {
    *   - `promise` — Promise который reject AgentError при abort
    *   - `clear` — Функция удаления слушателя (вызывать в finally)
    */
-  private createSignalPromise(signal?: AbortSignal): { promise: Promise<never>; clear: () => void } {
+  private createSignalPromise(signal?: AbortSignal): {
+    promise: Promise<never>;
+    clear: () => void;
+  } {
     if (!signal) {
       return { promise: new Promise<never>(() => {}), clear: () => {} };
     }

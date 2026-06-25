@@ -264,7 +264,7 @@ describe('sendToDlq', () => {
       const errorLog = vi.mocked(consoleErrorSpy).mock.calls[0][0];
 
       // Проверяем структуру error log
-      const parsedErrorLog = JSON.parse(errorLog);
+      const parsedErrorLog = JSON.parse(errorLog as string);
       expect(parsedErrorLog).toHaveProperty('level');
       expect(parsedErrorLog).toHaveProperty('event');
       expect(parsedErrorLog).toHaveProperty('sendError');
@@ -291,7 +291,7 @@ describe('sendToDlq', () => {
       await sendToDlq(mockProducer, originalMessage, originalError);
 
       const errorLog = vi.mocked(consoleErrorSpy).mock.calls[0][0];
-      const parsedErrorLog = JSON.parse(errorLog);
+      const parsedErrorLog = JSON.parse(errorLog as string);
 
       // Проверяем что original error logged correctly
       expect(parsedErrorLog.errorMessage).toBe('Original processing error');
@@ -314,7 +314,7 @@ describe('sendToDlq', () => {
       const afterCall = Date.now();
 
       const errorLog = vi.mocked(consoleErrorSpy).mock.calls[0][0];
-      const parsedErrorLog = JSON.parse(errorLog);
+      const parsedErrorLog = JSON.parse(errorLog as string);
 
       // Проверяем что failedAt валидный ISO timestamp в разумном временном окне
       expect(parsedErrorLog).toHaveProperty('failedAt');
@@ -340,7 +340,7 @@ describe('sendToDlq', () => {
       // Проверяем что console.error был вызван
       expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
       const errorLog = vi.mocked(consoleErrorSpy).mock.calls[0][0];
-      const parsedErrorLog = JSON.parse(errorLog);
+      const parsedErrorLog = JSON.parse(errorLog as string);
 
       // Проверяем что sendError конвертирован в string
       expect(parsedErrorLog.sendError).toBe('String error');
@@ -470,7 +470,7 @@ describe('sendToDlq', () => {
       const log = vi.mocked(consoleLogSpy).mock.calls[0][0];
 
       // Проверяем структуру success log
-      const parsedLog = JSON.parse(log);
+      const parsedLog = JSON.parse(log as string);
       expect(parsedLog).toHaveProperty('level');
       expect(parsedLog).toHaveProperty('event');
       expect(parsedLog).toHaveProperty('topic');
@@ -504,7 +504,7 @@ describe('sendToDlq', () => {
       await sendToDlq(mockProducer, originalMessage, error);
 
       const log = vi.mocked(consoleLogSpy).mock.calls[0][0];
-      const parsedLog = JSON.parse(log);
+      const parsedLog = JSON.parse(log as string);
 
       expect(parsedLog.topic).toBe('custom-dlq');
     });
@@ -523,7 +523,7 @@ describe('sendToDlq', () => {
       const afterCall = Date.now();
 
       const log = vi.mocked(consoleLogSpy).mock.calls[0][0];
-      const parsedLog = JSON.parse(log);
+      const parsedLog = JSON.parse(log as string);
 
       // Проверяем что failedAt валидный ISO timestamp в разумном временном окне
       const failedAtDate = new Date(parsedLog.failedAt);

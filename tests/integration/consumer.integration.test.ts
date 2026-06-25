@@ -15,6 +15,7 @@ import { Kafka } from 'kafkajs';
 
 import { eachMessageHandler, performGracefulShutdown, startConsumer } from '../../src/kafka/consumer.js';
 import type { PluginConfigV003, RuleV003 } from '../../src/schemas/index.js';
+import type { IOpenCodeAgent } from '../../src/opencode/IOpenCodeAgent.js';
 
 // ============================================================================
 // Constants
@@ -44,6 +45,19 @@ const TEST_TOPIC_2 = 'test-topic-2';
  * Таймаут для startup контейнера (2 минуты).
  */
 const CONTAINER_STARTUP_TIMEOUT_MS = 120_000;
+
+/**
+ * Базовый rule с обязательными полями для V003.
+ * Используется как основа для всех test rules.
+ */
+const baseRule: RuleV003 = {
+  agentId: 'test-agent',
+  timeoutMs: 30_000,
+  concurrency: 1,
+  name: '',
+  jsonPath: '',
+  promptTemplate: '',
+};
 
 // ============================================================================
 // Types
@@ -103,7 +117,10 @@ function createPayload(
       key,
       headers: {},
       timestamp: new Date().toISOString(),
+      attributes: 0,
     },
+    heartbeat: vi.fn().mockResolvedValue(undefined),
+    pause: vi.fn().mockReturnValue(vi.fn()),
   };
 }
 
@@ -299,6 +316,7 @@ describe('T007: Basic Message Production/Consumption', () => {
 
     // Подготавливаем данные
     const rule: RuleV003 = {
+      ...baseRule,
       name: 'test-rule',
       jsonPath: '$.type',
       promptTemplate: 'Process type {{type}}',
@@ -330,8 +348,18 @@ describe('T007: Basic Message Production/Consumption', () => {
     // Это симулирует то, что consumer получил бы сообщение из Kafka
     const payload = createPayload(TEST_TOPIC_1, JSON.stringify(testMessage), '0');
 
+    // Моковый agent
+    const mockAgent = {
+      invoke: vi.fn().mockResolvedValue({ ok: true, content: 'test response' }),
+    } as unknown as IOpenCodeAgent;
+
+    // Response producer (не используется в тесте, но нужен по сигнатуре)
+    const mockResponseProducer = {
+      send: vi.fn().mockResolvedValue([]),
+    } as unknown as Producer;
+
     // Вызываем eachMessageHandler напрямую
-    await eachMessageHandler(payload, config, dlqProducer, mockCommit, state);
+    await eachMessageHandler(payload, config, dlqProducer, mockCommit, state, mockAgent, mockResponseProducer);
 
     // Проверяем что сообщение обработано
     expect(state.totalMessagesProcessed).toBe(1);
@@ -394,6 +422,7 @@ describe('T009: Sequential Message Ordering', () => {
     if (!containerAvailable) return;
 
     const rule: RuleV003 = {
+      ...baseRule,
       name: 'order-rule',
       jsonPath: '$.order',
       promptTemplate: 'Process order {{order}}',
@@ -424,9 +453,19 @@ describe('T009: Sequential Message Ordering', () => {
     // Обрабатываем каждое сообщение через eachMessageHandler напрямую
     const mockCommit = async () => {};
 
+    // Моковый agent
+    const mockAgent = {
+      invoke: vi.fn().mockResolvedValue({ ok: true, content: 'test response' }),
+    } as unknown as IOpenCodeAgent;
+
+    // Response producer
+    const mockResponseProducer = {
+      send: vi.fn().mockResolvedValue([]),
+    } as unknown as Producer;
+
     for (let i = 0; i < messages.length; i++) {
       const payload = createPayload(TEST_TOPIC_2, JSON.stringify(messages[i]), String(i));
-      await eachMessageHandler(payload, config, dlqProducer, mockCommit, state);
+      await eachMessageHandler(payload, config, dlqProducer, mockCommit, state, mockAgent, mockResponseProducer);
     }
 
     // Проверяем что все сообщения обработаны
@@ -486,6 +525,7 @@ describe('T010: Invalid JSON → DLQ', () => {
     if (!containerAvailable) return;
 
     const rule: RuleV003 = {
+      ...baseRule,
       name: 'test-rule',
       jsonPath: '$.type',
       promptTemplate: 'Process type {{type}}',
@@ -513,8 +553,18 @@ describe('T010: Invalid JSON → DLQ', () => {
     // Вызываем eachMessageHandler напрямую с invalid JSON
     const payload = createPayload(TEST_TOPIC_1, invalidJson, '0');
 
+    // Моковый agent
+    const mockAgent = {
+      invoke: vi.fn().mockResolvedValue({ ok: true, content: 'test response' }),
+    } as unknown as IOpenCodeAgent;
+
+    // Response producer
+    const mockResponseProducer = {
+      send: vi.fn().mockResolvedValue([]),
+    } as unknown as Producer;
+
     // eachMessageHandler должен поймать ошибку парсинга и отправить в DLQ
-    await eachMessageHandler(payload, config, dlqProducer, mockCommit, state);
+    await eachMessageHandler(payload, config, dlqProducer, mockCommit, state, mockAgent, mockResponseProducer);
 
     // Проверяем что сообщение не крашнуло consumer
     expect(state.isShuttingDown).toBe(false);
@@ -582,6 +632,7 @@ describe('T011: Oversized Message → DLQ', () => {
     if (!containerAvailable) return;
 
     const rule: RuleV003 = {
+      ...baseRule,
       name: 'test-rule',
       jsonPath: '$.type',
       promptTemplate: 'Process type {{type}}',
@@ -599,8 +650,18 @@ describe('T011: Oversized Message → DLQ', () => {
 
     const payload = createPayload(TEST_TOPIC_1, oversizedBuffer, '0');
 
+    // Моковый agent
+    const mockAgent = {
+      invoke: vi.fn().mockResolvedValue({ ok: true, content: 'test response' }),
+    } as unknown as IOpenCodeAgent;
+
+    // Response producer
+    const mockResponseProducer = {
+      send: vi.fn().mockResolvedValue([]),
+    } as unknown as Producer;
+
     // Вызываем eachMessageHandler напрямую
-    await eachMessageHandler(payload, config, dlqProducer, mockCommit, state);
+    await eachMessageHandler(payload, config, dlqProducer, mockCommit, state, mockAgent, mockResponseProducer);
 
     // Проверяем что oversized сообщение отправлено в DLQ
     expect(state.dlqMessagesCount).toBe(1);
@@ -636,6 +697,7 @@ describe('T012: Unmatched Message — Skip Gracefully', () => {
 
     // Правило с JSONPath который не matchирует сообщение
     const rule: RuleV003 = {
+      ...baseRule,
       name: 'specific-rule',
       jsonPath: '$.nonexistent.path',
       promptTemplate: 'Process {{type}}',
@@ -663,7 +725,17 @@ describe('T012: Unmatched Message — Skip Gracefully', () => {
     // Вызываем eachMessageHandler напрямую с payload
     const payload = createPayload(TEST_TOPIC_1, JSON.stringify(unmatchedMessage), '0');
 
-    await eachMessageHandler(payload, config, dlqProducer, mockCommit, state);
+    // Моковый agent
+    const mockAgent = {
+      invoke: vi.fn().mockResolvedValue({ ok: true, content: 'test response' }),
+    } as unknown as IOpenCodeAgent;
+
+    // Response producer
+    const mockResponseProducer = {
+      send: vi.fn().mockResolvedValue([]),
+    } as unknown as Producer;
+
+    await eachMessageHandler(payload, config, dlqProducer, mockCommit, state, mockAgent, mockResponseProducer);
 
     // Проверяем что consumer не крашнулся
     expect(state.isShuttingDown).toBe(false);
@@ -822,7 +894,7 @@ describe.skipIf(!containerAvailable)('T016: Graceful Shutdown — Normal', () =>
     await testProducer.connect();
 
     // Act
-    await performGracefulShutdown(testConsumer, testProducer, 'SIGTERM', state);
+    await performGracefulShutdown(testConsumer, testProducer, vi.fn() as unknown as Producer, 'SIGTERM', state);
 
     // Assert
     expect(state.isShuttingDown).toBe(true);
@@ -844,7 +916,7 @@ describe.skipIf(!containerAvailable)('T016: Graceful Shutdown — Normal', () =>
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     // Act
-    await performGracefulShutdown(testConsumer, testProducer, 'SIGTERM', state);
+    await performGracefulShutdown(testConsumer, testProducer, vi.fn() as unknown as Producer, 'SIGTERM', state);
 
     // Assert — проверяем что логировались события shutdown
     const logCalls = logSpy.mock.calls.map(c => c[0]).filter(Boolean);
@@ -879,14 +951,14 @@ describe.skipIf(!containerAvailable)('T017: Graceful Shutdown — Idempotent', (
     await testProducer.connect();
 
     // Первый shutdown
-    await performGracefulShutdown(testConsumer, testProducer, 'SIGTERM', state);
+    await performGracefulShutdown(testConsumer, testProducer, vi.fn() as unknown as Producer, 'SIGTERM', state);
     expect(state.isShuttingDown).toBe(true);
 
     // Mock для отслеживания повторного disconnect
     const disconnectSpy = vi.spyOn(testConsumer, 'disconnect');
 
     // Act — второй shutdown
-    await performGracefulShutdown(testConsumer, testProducer, 'SIGTERM', state);
+    await performGracefulShutdown(testConsumer, testProducer, vi.fn() as unknown as Producer, 'SIGTERM', state);
 
     // Assert — disconnect не должен быть вызван повторно
     expect(disconnectSpy).toHaveBeenCalledTimes(0);
@@ -908,7 +980,7 @@ describe.skipIf(!containerAvailable)('T017: Graceful Shutdown — Idempotent', (
     await testProducer.connect();
 
     // Вызываем shutdown
-    await performGracefulShutdown(testConsumer, testProducer, 'SIGTERM', state);
+    await performGracefulShutdown(testConsumer, testProducer, vi.fn() as unknown as Producer, 'SIGTERM', state);
 
     // state.isShuttingDown должен быть true
     expect(state.isShuttingDown).toBe(true);
@@ -940,7 +1012,7 @@ describe.skipIf(!containerAvailable)('T018: Graceful Shutdown — Error Handling
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     // Act — shutdown должен продолжиться несмотря на ошибку
-    await performGracefulShutdown(testConsumer, testProducer, 'SIGTERM', state);
+    await performGracefulShutdown(testConsumer, testProducer, vi.fn() as unknown as Producer, 'SIGTERM', state);
 
     // Assert
     expect(state.isShuttingDown).toBe(true);
@@ -972,7 +1044,7 @@ describe.skipIf(!containerAvailable)('T018: Graceful Shutdown — Error Handling
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     // Act
-    await performGracefulShutdown(testConsumer, testProducer, 'SIGTERM', state);
+    await performGracefulShutdown(testConsumer, testProducer, vi.fn() as unknown as Producer, 'SIGTERM', state);
 
     // Assert
     expect(state.isShuttingDown).toBe(true);
@@ -1032,6 +1104,7 @@ describe.skipIf(!containerAvailable)('T019: startConsumer Lifecycle', () => {
     const testTopic = `test-start-consumer-${Date.now()}`;
 
     // Устанавливаем env vars
+    if (!bootstrapServers) return;
     process.env.KAFKA_BROKERS = bootstrapServers;
     process.env.KAFKA_GROUP_ID = generateGroupId('start-consumer');
     process.env.KAFKA_DLQ_TOPIC = TEST_DLQ_TOPIC;
@@ -1048,6 +1121,7 @@ describe.skipIf(!containerAvailable)('T019: startConsumer Lifecycle', () => {
     const testConfig: PluginConfigV003 = {
       topics: [testTopic],
       rules: [{
+        ...baseRule,
         name: 'test-rule',
         jsonPath: '$.type',
         promptTemplate: 'Process {{type}}',
@@ -1066,8 +1140,13 @@ describe.skipIf(!containerAvailable)('T019: startConsumer Lifecycle', () => {
     // Перехватываем логи для проверки подключения
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
+    // Моковый agent
+    const mockAgent = {
+      invoke: vi.fn().mockResolvedValue({ ok: true, content: 'test response' }),
+    } as unknown as IOpenCodeAgent;
+
     // Act — запускаем startConsumer в фоне
-    startConsumer(testConfig);
+    startConsumer(testConfig, mockAgent);
 
     // Ждём подключения (логируем kafka_consumer_started)
     const connected = await waitForCondition(
@@ -1109,8 +1188,13 @@ describe.skipIf(!containerAvailable)('T019: startConsumer Lifecycle', () => {
     // Mock process.exit
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
+    // Моковый agent
+    const mockAgent = {
+      invoke: vi.fn().mockResolvedValue({ ok: true, content: 'test response' }),
+    } as unknown as IOpenCodeAgent;
+
     // Act
-    startConsumer(testConfig);
+    startConsumer(testConfig, mockAgent);
 
     // Ждём выхода с ошибкой (невалидный broker)
     await waitForCondition(

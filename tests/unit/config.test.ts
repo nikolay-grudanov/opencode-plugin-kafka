@@ -146,6 +146,15 @@ describe('parseConfig', () => {
 
       expect(() => parseConfig()).toThrow('Failed to read config file');
     });
+
+    it('should throw Error when file read fails with primitive (non-Error)', () => {
+      // Тестируем ветку error instanceof Error = false → String(error)
+      vi.mocked(readFileSync).mockImplementation(() => {
+        throw 'String error'; // primitive, not Error instance
+      });
+
+      expect(() => parseConfig()).toThrow('Failed to read config file');
+    });
   });
 
   describe('Missing optional prompt_field defaults to "$"', () => {
@@ -310,6 +319,8 @@ describe('parseConfig', () => {
             promptTemplate: 'Process {$.status}',
             agentId: 'agent-1',
             responseTopic: 'output-topic-1',
+            timeoutMs: 120_000,
+            concurrency: 1,
           },
           {
             name: 'rule2',
@@ -317,6 +328,8 @@ describe('parseConfig', () => {
             promptTemplate: 'Handle {$.type}',
             agentId: 'agent-2',
             responseTopic: 'output-topic-2',
+            timeoutMs: 120_000,
+            concurrency: 1,
           },
         ],
       };
@@ -334,6 +347,8 @@ describe('parseConfig', () => {
             promptTemplate: 'Process {$.status}',
             agentId: 'agent-1',
             responseTopic: 'input-topic-1', // совпадает с input topic!
+            timeoutMs: 120_000,
+            concurrency: 1,
           },
         ],
       };
@@ -354,6 +369,8 @@ describe('parseConfig', () => {
             promptTemplate: 'Process {$.status}',
             agentId: 'agent-1',
             // responseTopic не указан (undefined)
+            timeoutMs: 120_000,
+            concurrency: 1,
           },
           {
             name: 'rule2',
@@ -361,6 +378,8 @@ describe('parseConfig', () => {
             promptTemplate: 'Handle {$.type}',
             agentId: 'agent-2',
             // responseTopic не указан (undefined)
+            timeoutMs: 120_000,
+            concurrency: 1,
           },
         ],
       };
@@ -378,6 +397,8 @@ describe('parseConfig', () => {
             promptTemplate: 'Process {$.status}',
             agentId: 'agent-1',
             responseTopic: 'topic-b', // конфликт
+            timeoutMs: 120_000,
+            concurrency: 1,
           },
         ],
       };
@@ -403,6 +424,8 @@ describe('parseConfig', () => {
               jsonPath: '$.status',
               promptTemplate: 'Process {$.status}',
               agentId: 'agent1',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
             {
               name: 'rule2',
@@ -410,6 +433,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Handle {$.type}',
               agentId: 'agent2',
               responseTopic: 'response-topic',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -434,6 +459,8 @@ describe('parseConfig', () => {
               jsonPath: '$.test',
               promptTemplate: 'Test',
               agentId: 'agent1',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -457,6 +484,8 @@ describe('parseConfig', () => {
               jsonPath: '$.test',
               promptTemplate: 'Test',
               agentId: 'agent1',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -486,6 +515,15 @@ describe('parseConfig', () => {
 
         expect(() => parseConfigV003()).toThrow('Failed to read config file');
       });
+
+      it('should throw Error when V003 file read fails with primitive (non-Error)', () => {
+        // Тестируем ветку error instanceof Error = false → String(error) в parseConfigV003
+        vi.mocked(readFileSync).mockImplementation(() => {
+          throw 'String error';
+        });
+
+        expect(() => parseConfigV003()).toThrow('Failed to read config file');
+      });
     });
 
     describe('V003 topic coverage validation (FR-017)', () => {
@@ -498,6 +536,8 @@ describe('parseConfig', () => {
               jsonPath: '$.status',
               promptTemplate: 'Process',
               agentId: 'agent1',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
             {
               name: 'rule2',
@@ -505,6 +545,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Handle',
               agentId: 'agent2',
               responseTopic: 'response-topic',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -524,6 +566,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Process',
               agentId: 'agent1',
               responseTopic: 'input-topic', // совпадает с input topic!
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -543,6 +587,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Process',
               agentId: 'agent1',
               responseTopic: 'valid-response',
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
             {
               name: 'rule2',
@@ -550,6 +596,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Handle',
               agentId: 'agent2',
               responseTopic: 'topic-a', // конфликт!
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -569,6 +617,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Process',
               agentId: 'agent1',
               // responseTopic не указан (undefined)
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -590,6 +640,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Process',
               agentId: 'agent1',
               responseTopic: undefined, // undefined - не конфликт
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };
@@ -611,6 +663,8 @@ describe('parseConfig', () => {
               promptTemplate: 'Process',
               agentId: 'agent1',
               responseTopic: 'a', // Минимум 1 символ - валидно
+              timeoutMs: 120_000,
+              concurrency: 1,
             },
           ],
         };

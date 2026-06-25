@@ -14,13 +14,38 @@ import { describe, it, expect, beforeAll, afterAll, vi, beforeEach, afterEach } 
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
 import type { PluginConfigV003 } from '../../src/schemas/index.js';
 
-// Import setup functions (могут быть использованы для будущих реальных integration tests)
+// Import setup functions
 import { createRedpandaContainer, cleanupRedpandaContainer } from './setup';
 import type { StartedTestContainer } from 'testcontainers';
 
 // Import helpers для mock объектов
 import { createMockHandlerDeps, createMockErrorAgent, createMockTimeoutAgent } from './helpers/index.js';
 import type { MockHandlerDeps } from './helpers/index.js';
+import type { EachMessagePayload } from 'kafkajs';
+
+/**
+ * Helper function to create EachMessagePayload compatible object.
+ */
+function createPayload(
+  topic: string,
+  partition: number,
+  value: Buffer | string,
+  offset: string,
+  key: Buffer | null = null,
+  headers: Record<string, Buffer> = {}
+): EachMessagePayload {
+  return {
+    topic,
+    partition,
+    message: {
+      value: typeof value === 'string' ? Buffer.from(value) : value,
+      offset,
+      key,
+      headers,
+      timestamp: '2024-04-22T00:00:00.000Z',
+    },
+  } as unknown as EachMessagePayload;
+}
 
 describe('Integration Tests: DLQ Flow', () => {
   let redpandaContainer: StartedTestContainer | null = null;
@@ -64,6 +89,9 @@ describe('Integration Tests: DLQ Flow', () => {
           name: 'test-rule',
           jsonPath: '$.test',
           promptTemplate: 'Process: ${$}',
+          agentId: 'test-agent',
+          timeoutMs: 30000,
+          concurrency: 1,
         },
       ],
     };
@@ -86,17 +114,7 @@ describe('Integration Tests: DLQ Flow', () => {
 
   describe('Invalid JSON message lands in DLQ topic', () => {
     it('должен отправить невалидный JSON в DLQ с правильным envelope', async () => {
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('invalid json'),
-          offset: '42',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', 0, Buffer.from('invalid json'), '42');
 
       await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
@@ -124,17 +142,7 @@ describe('Integration Tests: DLQ Flow', () => {
     });
 
     it('должен отправить в DLQ при некорректной JSON структуре (unclosed brace)', async () => {
-      const payload = {
-        topic: 'test-topic',
-        partition: 1,
-        message: {
-          value: Buffer.from('{"test": unclosed}'),
-          offset: '789',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', 1, Buffer.from('{"test": unclosed}'), '789');
 
       await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
@@ -155,17 +163,7 @@ describe('Integration Tests: DLQ Flow', () => {
     });
 
     it('должен отправить в DLQ при пустом JSON', async () => {
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from(''),
-          offset: '123',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', 0, Buffer.from(''), '123');
 
       await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
@@ -182,17 +180,7 @@ describe('Integration Tests: DLQ Flow', () => {
 
   describe('DLQ envelope has correct structure', () => {
     it('должен содержать все required fields в DLQ envelope', async () => {
-      const payload = {
-        topic: 'test-topic',
-        partition: 2,
-        message: {
-          value: Buffer.from('invalid json'),
-          offset: '456',
-          key: Buffer.from('test-key'),
-          headers: { 'header1': Buffer.from('value1') },
-          timestamp: '2024-04-22T12:34:56.789Z',
-        },
-      };
+      const payload = createPayload('test-topic', 2, Buffer.from('invalid json'), '456', Buffer.from('test-key'), { header1: Buffer.from('value1') });
 
       await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
@@ -218,17 +206,7 @@ describe('Integration Tests: DLQ Flow', () => {
 
     it('должн устанавливать failedAt как ISO 8601 timestamp', async () => {
       const beforeCall = Date.now();
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('invalid json'),
-          offset: '42',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', 0, Buffer.from('invalid json'), '42');
 
       await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
       const afterCall = Date.now();
@@ -246,17 +224,7 @@ describe('Integration Tests: DLQ Flow', () => {
     });
 
     it('должен использовать правильный DLQ topic name', async () => {
-      const payload = {
-        topic: 'my-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('invalid json'),
-          offset: '42',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('my-topic', 0, Buffer.from('invalid json'), '42');
 
       await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
@@ -271,17 +239,7 @@ describe('Integration Tests: DLQ Flow', () => {
       // Set custom DLQ topic
       process.env.KAFKA_DLQ_TOPIC = 'custom-dlq-topic';
 
-      const payload = {
-        topic: 'my-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('invalid json'),
-          offset: '42',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('my-topic', 0, Buffer.from('invalid json'), '42');
 
       await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
@@ -298,17 +256,7 @@ describe('Integration Tests: DLQ Flow', () => {
 
   describe('DLQ send failure does NOT crash consumer', () => {
     it('должен продолжать работу при Producer.send() failure', async () => {
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('invalid json'),
-          offset: '42',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', 0, Buffer.from('invalid json'), '42');
 
       // Mock Producer.send() to throw error
       vi.mocked(deps.dlqProducer.send).mockRejectedValueOnce(
@@ -328,17 +276,7 @@ describe('Integration Tests: DLQ Flow', () => {
     });
 
     it('должен логировать ошибку при Producer.send() failure', async () => {
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('invalid json'),
-          offset: '42',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', 0, Buffer.from('invalid json'), '42');
 
       const kafkaError = new Error('Kafka connection failed');
       vi.mocked(deps.dlqProducer.send).mockRejectedValueOnce(kafkaError);
@@ -347,7 +285,7 @@ describe('Integration Tests: DLQ Flow', () => {
 
       // Проверяем что console.error был вызван
       expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
-      const errorLog = vi.mocked(consoleErrorSpy).mock.calls[0][0];
+      const errorLog = vi.mocked(consoleErrorSpy).mock.calls[0][0] as string;
 
       // Проверяем структуру error log
       const parsedErrorLog = JSON.parse(errorLog);
@@ -361,45 +299,15 @@ describe('Integration Tests: DLQ Flow', () => {
 
     it('должен корректно обрабатывать несколько сообщений при intermittent DLQ failures', async () => {
       const payloads = [
-        {
-          topic: 'test-topic',
-          partition: 0,
-          message: {
-            value: Buffer.from('invalid json 1'),
-            offset: '1',
-            key: null,
-            headers: {},
-            timestamp: '2024-04-22T00:00:00.000Z',
-          },
-        },
-        {
-          topic: 'test-topic',
-          partition: 0,
-          message: {
-            value: Buffer.from('invalid json 2'),
-            offset: '2',
-            key: null,
-            headers: {},
-            timestamp: '2024-04-22T00:00:00.000Z',
-          },
-        },
-        {
-          topic: 'test-topic',
-          partition: 0,
-          message: {
-            value: Buffer.from('invalid json 3'),
-            offset: '3',
-            key: null,
-            headers: {},
-            timestamp: '2024-04-22T00:00:00.000Z',
-          },
-        },
+        createPayload('test-topic', 0, Buffer.from('invalid json 1'), '1'),
+        createPayload('test-topic', 0, Buffer.from('invalid json 2'), '2'),
+        createPayload('test-topic', 0, Buffer.from('invalid json 3'), '3'),
       ];
 
       // Mock Producer.send() для первого и третьего сообщений (fail), для второго (success)
       vi.mocked(deps.dlqProducer.send)
         .mockRejectedValueOnce(new Error('Kafka connection failed'))
-        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([])
         .mockRejectedValueOnce(new Error('Kafka connection failed'));
 
       // Обрабатываем все сообщения
@@ -419,17 +327,7 @@ describe('Integration Tests: DLQ Flow', () => {
 
   describe('Integration with eachMessageHandler', () => {
     it('должен обрабатывать полный поток: invalid JSON → DLQ → commit', async () => {
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('invalid json'),
-          offset: '42',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', 0, Buffer.from('invalid json'), '42');
 
       await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
@@ -459,17 +357,7 @@ describe('Integration Tests: DLQ Flow', () => {
         throw new Error('matchRuleV003 failed');
       });
 
-      const payload = {
-        topic: 'test-topic',
-        partition: 1,
-        message: {
-          value: Buffer.from('{"test": "value"}'),
-          offset: '789',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', 1, Buffer.from('{"test": "value"}'), '789');
 
       await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
@@ -491,17 +379,7 @@ describe('Integration Tests: DLQ Flow', () => {
         throw new Error('Unexpected internal error');
       });
 
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('{"test": "value"}'),
-          offset: '42',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', 0, Buffer.from('{"test": "value"}'), '42');
 
       await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
@@ -521,17 +399,7 @@ describe('Integration Tests: DLQ Flow', () => {
     });
 
     it('должен логировать successful DLQ send', async () => {
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('invalid json'),
-          offset: '42',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', 0, Buffer.from('invalid json'), '42');
 
       await eachMessageHandler(payload, mockConfig, deps.dlqProducer, deps.commitOffsets, deps.state, deps.agent, deps.responseProducer, deps.activeSessions);
 
@@ -554,17 +422,7 @@ describe('Integration Tests: DLQ Flow', () => {
     });
 
     it('отправляет сообщение в DLQ когда агент возвращает status=error', async () => {
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('{"test": "value"}'),
-          offset: '42',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', 0, Buffer.from('{"test": "value"}'), '42');
 
       await eachMessageHandler(
         payload,
@@ -601,17 +459,7 @@ describe('Integration Tests: DLQ Flow', () => {
     });
 
     it('отправляет сообщение в DLQ когда агент возвращает status=timeout', async () => {
-      const payload = {
-        topic: 'test-topic',
-        partition: 0,
-        message: {
-          value: Buffer.from('{"test": "value"}'),
-          offset: '42',
-          key: null,
-          headers: {},
-          timestamp: '2024-04-22T00:00:00.000Z',
-        },
-      };
+      const payload = createPayload('test-topic', 0, Buffer.from('{"test": "value"}'), '42');
 
       await eachMessageHandler(
         payload,

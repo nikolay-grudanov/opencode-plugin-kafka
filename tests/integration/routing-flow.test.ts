@@ -14,6 +14,18 @@ import { matchRuleV003 } from '../../src/core/routing';
 import { buildPromptV003 } from '../../src/core/prompt';
 import type { RuleV003 } from '../../src/schemas/index.js';
 
+/**
+ * Базовый rule с обязательными полями для V003.
+ */
+const baseRule: RuleV003 = {
+  agentId: 'test-agent',
+  timeoutMs: 30_000,
+  concurrency: 1,
+  name: '',
+  jsonPath: '',
+  promptTemplate: '',
+};
+
 describe('Integration Tests: Routing Flow (spec 003)', () => {
   let redpandaContainer: StartedTestContainer | null = null;
   let bootstrapServers: string | null = null;
@@ -44,6 +56,7 @@ describe('Integration Tests: Routing Flow (spec 003)', () => {
     it('должен найти соответствующее правило по JSONPath condition', () => {
       const rules: RuleV003[] = [
         {
+          ...baseRule,
           name: 'critical-vulns',
           jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]',
           promptTemplate: 'Investigate: ${$.vulnerabilities}',
@@ -66,6 +79,7 @@ describe('Integration Tests: Routing Flow (spec 003)', () => {
     it('должен вернуть null если ни одно правило не совпадает', () => {
       const rules: RuleV003[] = [
         {
+          ...baseRule,
           name: 'critical-vulns',
           jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]',
           promptTemplate: 'Investigate: ${$.vulnerabilities}',
@@ -87,6 +101,7 @@ describe('Integration Tests: Routing Flow (spec 003)', () => {
   describe('Поток 2: Routing → Prompt Building (buildPromptV003)', () => {
     it('должен создать prompt с placeholder substitution', () => {
       const rule: RuleV003 = {
+        ...baseRule,
         name: 'code-audit',
         jsonPath: '$.tasks',
         promptTemplate: '/audit ${$.tasks[0].description}',
@@ -109,6 +124,7 @@ describe('Integration Tests: Routing Flow (spec 003)', () => {
 
     it('должен обрабатывать примитивные типы', () => {
       const rule: RuleV003 = {
+        ...baseRule,
         name: 'process-count',
         jsonPath: '$.count',
         promptTemplate: 'Count: ${$.count}',
@@ -123,6 +139,7 @@ describe('Integration Tests: Routing Flow (spec 003)', () => {
 
     it('должен возвращать fallback при отсутствии пути в payload', () => {
       const rule: RuleV003 = {
+        ...baseRule,
         name: 'default-rule',
         jsonPath: '$.data',
         promptTemplate: '/process ${$.nonexistent}',
@@ -137,6 +154,7 @@ describe('Integration Tests: Routing Flow (spec 003)', () => {
 
     it('должен возвращать fallback для пустого шаблона', () => {
       const rule: RuleV003 = {
+        ...baseRule,
         name: 'empty-rule',
         jsonPath: '$.data',
         promptTemplate: 'No placeholders here',
@@ -155,6 +173,7 @@ describe('Integration Tests: Routing Flow (spec 003)', () => {
     it('должен обработать полный поток от message до prompt', () => {
       const rules: RuleV003[] = [
         {
+          ...baseRule,
           name: 'vuln-analysis',
           jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]',
           promptTemplate: '/analyze ${$}',
@@ -185,11 +204,13 @@ describe('Integration Tests: Routing Flow (spec 003)', () => {
     it('должен вернуть первое совпавшее правило', () => {
       const rules: RuleV003[] = [
         {
+          ...baseRule,
           name: 'rule-1',
           jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]',
           promptTemplate: '/urgent ${$}',
         },
         {
+          ...baseRule,
           name: 'rule-2',
           jsonPath: '$.vulnerabilities[?(@.severity=="LOW")]',
           promptTemplate: '/low-priority ${$}',
@@ -213,6 +234,7 @@ describe('Integration Tests: Routing Flow (spec 003)', () => {
   describe('Поток 5: JSONPath expression result', () => {
     it('должен корректно обрабатывать результат JSONPath как массив', () => {
       const rule: RuleV003 = {
+        ...baseRule,
         name: 'all-critical',
         jsonPath: '$.vulnerabilities',
         promptTemplate: 'Critical: ${$.vulnerabilities[0].id}',

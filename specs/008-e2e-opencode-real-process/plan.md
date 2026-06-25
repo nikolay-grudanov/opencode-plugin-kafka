@@ -5,7 +5,7 @@
 
 ## Summary
 
-Добавить E2E-тесты (6 сценариев), проверяющие полный конвейер: Kafka message → plugin (eachMessageHandler) → OpenCodeAgentAdapter → opencode serve :3001 → Lemonade LLM → responseTopic / DLQ. Тесты используют реальный Redpanda через testcontainers, реальный opencode serve процесс и локальный Lemonade LLM.
+Добавить E2E-тесты (8 сценариев), проверяющие полный конвейер: Kafka message → plugin (eachMessageHandler) → OpenCodeAgentAdapter → opencode serve :3001 → Lemonade LLM → responseTopic / DLQ. Тесты используют реальный Redpanda через testcontainers, реальный opencode serve процесс и локальный Lemonade LLM.
 
 ## Technical Context
 
@@ -17,7 +17,7 @@
 **Project Type**: library (OpenCode plugin — E2E test layer)
 **Performance Goals**: Каждый тест ≤90s, timeout-тест ≤60s, full suite ≤10min
 **Constraints**: Sequential execution (single fork), реальный LLM (non-deterministic), Lemonade prerequisite
-**Scale/Scope**: 6 E2E test scenarios, 4 helper modules, 1 Vitest config, 1 GitHub Actions workflow
+**Scale/Scope**: 8 E2E test scenarios, 4 helper modules, 1 Vitest config, 1 GitHub Actions workflow
 
 ## Constitution Check
 
@@ -94,6 +94,7 @@ package.json                              ← добавить "test:e2e" script
 3. **`tests/e2e/helpers/opencodeProcess.ts`** — управление opencode serve
    - `spawnOpenCodeServe(opts): Promise<OpenCodeProcessHandle>` — spawn + health check
    - Port pre-check, health polling, SIGTERM→SIGKILL kill strategy
+   - PID logging при spawn для zombie detection
 
 4. **`tests/e2e/helpers/kafkaUtils.ts`** — Kafka utilities
    - `createTopics(brokers, topics)` — admin client, create topics
@@ -105,13 +106,18 @@ package.json                              ← добавить "test:e2e" script
    - Устанавливает process.env → вызывает startConsumer → возвращает handle
    - `stop()` — performGracefulShutdown или state.isShuttingDown
 
+6a. **`tests/e2e/helpers/timing.ts`** — performance monitoring
+   - `startTimer(label): () => number` — возвращает функцию, при вызове логирует elapsed ms
+   - Логировать: Redpanda startup, opencode serve startup, test execution time
+   - Формат: `[e2e-timing] {label}: {ms}ms`
+
 6. **`.opencode/opencode.json`** — добавить agent e2e-responder
 7. **`.opencode/agents/e2e-responder.md`** — системный промпт
 8. **`package.json`** — добавить `"test:e2e": "vitest run --config vitest.e2e.config.ts"`
 
-### Phase 2: E2E Tests (6 сценариев)
+### Phase 2: E2E Tests (8 сценариев)
 
-**Цель**: Реализовать все 6 тестов из спецификации.
+**Цель**: Реализовать все 8 тестов из спецификации.
 
 1. **T-E2E-001**: Happy path — success + responseTopic
 2. **T-E2E-002**: Routing — JSONPath match/skip
@@ -119,6 +125,8 @@ package.json                              ← добавить "test:e2e" script
 4. **T-E2E-004**: Agent timeout → DLQ
 5. **T-E2E-005**: Empty/minimal response → success, not DLQ
 6. **T-E2E-006**: Fire-and-forget — no responseTopic
+7. **T-E2E-007**: Invalid Kafka message → DLQ (malformed JSON)
+8. **T-E2E-008**: Consumer recovery — handles series of errors
 
 ### Phase 3: CI + Documentation
 
@@ -131,11 +139,14 @@ package.json                              ← добавить "test:e2e" script
 
 **Проблема**: OpenCodeAgentAdapter принимает `SDKClient` с `session: SessionsAPI`. Для E2E нужен клиент, подключённый к `http://localhost:3001`.
 
-**Варианты**:
-- A) Использовать `opencode` SDK npm-пакет с baseURL конфигурацией
-- B) Создать HTTP-обёртку, реализующую SessionsAPI через fetch к opencode serve
+**Decision**: Использовать `@opencode-ai/sdk` с custom baseURL.
 
-**Рекомендация**: Начать с варианта A (исследовать `opencode` SDK API при реализации). Если SDK не поддерживает custom baseURL — fallback на B.
+**Implementation:** `new Opencode({ baseURL: opencodeServeURL })` — клиент подключается к тестовому opencode serve.
+
+**Rationale:**
+- SDK официально поддерживает custom baseURL через конструктор
+- Не нужно писать HTTP wrapper — SDK уже реализует SessionsAPI
+- Импорт: `import { Opencode } from '@opencode-ai/sdk'`
 
 ### D2: Plugin shutdown
 

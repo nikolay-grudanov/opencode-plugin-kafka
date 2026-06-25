@@ -6,7 +6,13 @@
  */
 
 // Re-export types from schemas (derived from z.infer<>)
-export type { RuleV003, PluginConfigV003, Payload, KafkaMessage, ProcessingResult } from '../schemas/index.js';
+export type {
+  RuleV003,
+  PluginConfigV003,
+  Payload,
+  KafkaMessage,
+  ProcessingResult,
+} from '../schemas/index.js';
 
 // Re-export schemas for convenience
 export { RuleV003Schema, PluginConfigV003Schema } from '../schemas/index.js';

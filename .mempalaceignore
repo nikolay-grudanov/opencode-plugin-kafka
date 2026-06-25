@@ -1,0 +1,8 @@
+# Ignored by mempalace mine
+node_modules/
+dist/
+coverage/
+.git/
+graphify-out/
+*.log
+*.lock

@@ -43,10 +43,24 @@ export interface Message {
 
 /**
  * Сообщение от ассистента - расширенное сообщение с частями.
+ * hey-api wrapper: реальный ответ оборачивается в { data: AssistantMessage, error: null }
  */
 export interface AssistantMessage extends Message {
   role: 'assistant';
   parts: MessagePart[];
+  // hey-api wrapper fields
+  data?: {
+    info?: {
+      id: string;
+      role: string;
+      mode: string;
+      agent: string;
+      tokens?: { total: number; input: number; output: number };
+      finish: string;
+      sessionID: string;
+    };
+    parts: MessagePart[];
+  };
 }
 
 // ============================================================================
@@ -55,12 +69,23 @@ export interface AssistantMessage extends Message {
 
 /**
  * Сессия представляет активный диалог с ассистентом.
+ * hey-api wrapper: реальный ответ оборачивается в { data: Session, error: null }
  */
 export interface Session {
   id: string;
   title?: string;
+  slug?: string;
+  version?: string;
+  projectID?: string;
+  directory?: string;
+  path?: string;
   createdAt?: string;
   updatedAt?: string;
+  // hey-api wrapper fields
+  data?: {
+    id: string;
+    title?: string;
+  };
 }
 
 // ============================================================================
@@ -122,43 +147,43 @@ export interface DeleteSessionParams {
 
 /**
  * API для управления сессиями ассистента.
- * Предоставляет методы для создания, промптинга, завершения и удаления сессий.
+ * hey-api wrapper: все методы возвращают Promise<{ data: T, error: null }>
  */
 export interface SessionsAPI {
   /**
    * Создать новую сессию с ассистентом.
    * @param params - параметры создания сессии
-   * @returns созданная сессия
+   * @returns { data: Session, error: null }
    */
-  create(params: CreateSessionParams): Promise<Session>;
+  create(params: CreateSessionParams): Promise<{ data: Session; error: null }>;
 
   /**
    * Отправить промпт в существующую сессию.
    * @param params - параметры промпта (path.id - ID сессии, body.parts - части сообщения)
-   * @returns ответ ассистента
+   * @returns { data: AssistantMessage, error: null }
    */
-  prompt(params: PromptSessionParams): Promise<AssistantMessage>;
+  prompt(params: PromptSessionParams): Promise<{ data: AssistantMessage; error: null }>;
 
   /**
    * Прервать выполнение в сессии.
    * @param params - параметры (path.id - ID сессии)
-   * @returns true при успешном завершении
+   * @returns { data: boolean, error: null }
    */
-  abort(params: AbortSessionParams): Promise<boolean>;
+  abort(params: AbortSessionParams): Promise<{ data: boolean; error: null }>;
 
   /**
    * Удалить сессию.
    * @param params - параметры (path.id - ID сессии)
-   * @returns true при успешном удалении
+   * @returns { data: boolean, error: null }
    */
-  delete(params: DeleteSessionParams): Promise<boolean>;
+  delete(params: DeleteSessionParams): Promise<{ data: boolean; error: null }>;
 
   /**
    * Получить список сообщений сессии.
    * @param params - параметры (path.id - ID сессии)
-   * @returns массив сообщений
+   * @returns { data: Message[], error: null }
    */
-  messages(params: GetMessagesParams): Promise<Message[]>;
+  messages(params: GetMessagesParams): Promise<{ data: Message[]; error: null }>;
 }
 
 // ============================================================================

@@ -50,22 +50,18 @@ export class MockOpenCodeAgent implements IOpenCodeAgent {
    * @param configs - массив конфигураций для разных agentId
    */
   constructor(configs: MockAgentConfig[]) {
-    this.configMap = new Map(configs.map(c => [c.agentId, c]));
+    this.configMap = new Map(configs.map((c) => [c.agentId, c]));
   }
 
-/**
-    * Вызвать мок агента.
-    *
-    * @param prompt - текст промпта (игнорируется в моке)
-    * @param agentId - ID агента для поиска конфигурации
-    * @param options - опции вызова (timeoutMs)
-    * @returns результат согласно конфигурации или ошибка
-    */
-  async invoke(
-    _prompt: string,
-    agentId: string,
-    options: InvokeOptions
-  ): Promise<AgentResult> {
+  /**
+   * Вызвать мок агента.
+   *
+   * @param prompt - текст промпта (игнорируется в моке)
+   * @param agentId - ID агента для поиска конфигурации
+   * @param options - опции вызова (timeoutMs)
+   * @returns результат согласно конфигурации или ошибка
+   */
+  async invoke(_prompt: string, agentId: string, options: InvokeOptions): Promise<AgentResult> {
     const startTime = Date.now();
     const sessionId = randomUUID();
     this.activeSessions.add(sessionId);
@@ -123,13 +119,17 @@ export class MockOpenCodeAgent implements IOpenCodeAgent {
       // Задержка если нужна
       if (delayMs > 0) {
         // C2: Проверяем abort во время delay
-        const delayPromise = new Promise<void>(resolve => {
+        const delayPromise = new Promise<void>((resolve) => {
           const timer = setTimeout(resolve, delayMs);
           if (options.signal) {
-            options.signal.addEventListener('abort', () => {
-              clearTimeout(timer);
-              resolve();
-            }, { once: true });
+            options.signal.addEventListener(
+              'abort',
+              () => {
+                clearTimeout(timer);
+                resolve();
+              },
+              { once: true }
+            );
           }
         });
         await delayPromise;
