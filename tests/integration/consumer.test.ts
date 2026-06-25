@@ -19,6 +19,7 @@ import type { PluginConfigV003 } from '../../src/schemas/index.js';
 import type { IOpenCodeAgent, AgentResult } from '../../src/opencode/IOpenCodeAgent.js';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
 import { waitFor, uniqueTopicId, uniqueGroupId, createTopics, safeStopConsumer } from './helpers/index.js';
+import { createTestConfig, createTestRule } from '../unit/helpers/testConfig.js';
 
 /**
  * Mock состояние consumer для тестов (Constitution Principle IV: No-State Consumer)
@@ -126,27 +127,13 @@ describe('Integration Tests: Real Kafka Consumer Flow', () => {
   /**
    * Test Config для consumer
    */
-  const testConfig: PluginConfigV003 = {
+  const testConfig = createTestConfig({
     topics: [testTopic],
     rules: [
-      {
-        name: 'vuln-rule',
-        jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]',
-        promptTemplate: 'Analyze vulnerabilities: ${$.vulnerabilities}',
-        agentId: 'test-agent',
-        timeoutMs: 30000,
-        concurrency: 1,
-      },
-      {
-        name: 'audit-rule',
-        jsonPath: '$.tasks[?(@.type=="code-audit")]',
-        promptTemplate: 'Audit task: ${$.tasks[0].description}',
-        agentId: 'test-agent',
-        timeoutMs: 30000,
-        concurrency: 1,
-      },
+      createTestRule({ name: 'vuln-rule', jsonPath: '$.vulnerabilities[?(@.severity=="CRITICAL")]', promptTemplate: 'Analyze vulnerabilities: ${$.vulnerabilities}', agentId: 'test-agent' }),
+      createTestRule({ name: 'audit-rule', jsonPath: '$.tasks[?(@.type=="code-audit")]', promptTemplate: 'Audit task: ${$.tasks[0].description}', agentId: 'test-agent' }),
     ],
-  };
+  });
 
   /**
    * Setup: Запуск Redpanda контейнера перед всеми тестами

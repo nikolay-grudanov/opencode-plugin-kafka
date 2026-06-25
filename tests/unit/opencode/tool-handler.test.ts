@@ -111,7 +111,7 @@ describe('createSendToKafkaTool', () => {
         ]),
       })
     );
-    expect(result.metadata).toMatchObject({ topic: 'override-topic' });
+    expect((result as { output: string; metadata: Record<string, unknown> }).metadata).toMatchObject({ topic: 'override-topic' });
   });
 
   it('uses rule default responseTopic when LLM omits it', async () => {
@@ -163,7 +163,7 @@ describe('createSendToKafkaTool', () => {
     );
 
     expect(mockSend).not.toHaveBeenCalled();
-    expect(result.metadata).toMatchObject({ error: true });
+    expect((result as { output: string; metadata: Record<string, unknown> }).metadata).toMatchObject({ error: true });
     expect((result as { output: string }).output).toContain('error');
   });
 
@@ -179,7 +179,7 @@ describe('createSendToKafkaTool', () => {
     );
 
     expect(mockSend).not.toHaveBeenCalled();
-    expect(result.metadata).toMatchObject({ error: true });
+    expect((result as { output: string; metadata: Record<string, unknown> }).metadata).toMatchObject({ error: true });
     expect((result as { output: string }).output).toContain('error');
   });
 
@@ -195,7 +195,7 @@ describe('createSendToKafkaTool', () => {
     );
 
     expect(mockSend).not.toHaveBeenCalled();
-    expect(result.metadata).toMatchObject({ error: true });
+    expect((result as { output: string; metadata: Record<string, unknown> }).metadata).toMatchObject({ error: true });
   });
 });
 

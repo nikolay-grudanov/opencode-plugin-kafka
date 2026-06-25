@@ -12,6 +12,7 @@ vi.mock('fs', () => ({
 }));
 
 import { parseConfig, parseConfigV003, validateTopicCoverage } from '../../src/core/config.js';
+import type { PluginConfigV003 } from '../../src/schemas/index.js';
 import { readFileSync } from 'fs';
 
 describe('parseConfig', () => {
@@ -334,7 +335,7 @@ describe('parseConfig', () => {
         ],
       };
 
-      expect(() => validateTopicCoverage(config)).not.toThrow();
+      expect(() => validateTopicCoverage(config as PluginConfigV003)).not.toThrow();
     });
 
     it('should throw when a responseTopic matches an input topic', () => {
@@ -349,14 +350,18 @@ describe('parseConfig', () => {
             responseTopic: 'input-topic-1', // совпадает с input topic!
             timeoutMs: 120_000,
             concurrency: 1,
+            requireToolCall: true,
+            fallbackToTextCapture: false,
+            safetyNetTimeoutMs: 60000,
+            maxSessionMs: 300000,
           },
         ],
       };
 
-      expect(() => validateTopicCoverage(config)).toThrow(
+      expect(() => validateTopicCoverage(config as PluginConfigV003)).toThrow(
         'FR-017 topic coverage violation'
       );
-      expect(() => validateTopicCoverage(config)).toThrow('input-topic-1');
+      expect(() => validateTopicCoverage(config as PluginConfigV003)).toThrow('input-topic-1');
     });
 
     it('should NOT throw when rules have no responseTopic (all undefined)', () => {
@@ -371,6 +376,10 @@ describe('parseConfig', () => {
             // responseTopic не указан (undefined)
             timeoutMs: 120_000,
             concurrency: 1,
+            requireToolCall: true,
+            fallbackToTextCapture: false,
+            safetyNetTimeoutMs: 60000,
+            maxSessionMs: 300000,
           },
           {
             name: 'rule2',
@@ -380,11 +389,15 @@ describe('parseConfig', () => {
             // responseTopic не указан (undefined)
             timeoutMs: 120_000,
             concurrency: 1,
+            requireToolCall: true,
+            fallbackToTextCapture: false,
+            safetyNetTimeoutMs: 60000,
+            maxSessionMs: 300000,
           },
         ],
       };
 
-      expect(() => validateTopicCoverage(config)).not.toThrow();
+      expect(() => validateTopicCoverage(config as PluginConfigV003)).not.toThrow();
     });
 
     it('should throw descriptive error message with the conflicting topic name', () => {
@@ -399,11 +412,15 @@ describe('parseConfig', () => {
             responseTopic: 'topic-b', // конфликт
             timeoutMs: 120_000,
             concurrency: 1,
+            requireToolCall: true,
+            fallbackToTextCapture: false,
+            safetyNetTimeoutMs: 60000,
+            maxSessionMs: 300000,
           },
         ],
       };
 
-      expect(() => validateTopicCoverage(config)).toThrow(
+      expect(() => validateTopicCoverage(config as PluginConfigV003)).toThrow(
         'FR-017 topic coverage violation: responseTopic "topic-b" cannot be one of the input topics: topic-a, topic-b, topic-c'
       );
     });
@@ -426,6 +443,10 @@ describe('parseConfig', () => {
               agentId: 'agent1',
               timeoutMs: 120_000,
               concurrency: 1,
+              requireToolCall: true,
+              fallbackToTextCapture: false,
+              safetyNetTimeoutMs: 60000,
+              maxSessionMs: 300000,
             },
             {
               name: 'rule2',
@@ -435,6 +456,10 @@ describe('parseConfig', () => {
               responseTopic: 'response-topic',
               timeoutMs: 120_000,
               concurrency: 1,
+              requireToolCall: true,
+              fallbackToTextCapture: false,
+              safetyNetTimeoutMs: 60000,
+              maxSessionMs: 300000,
             },
           ],
         };
@@ -461,6 +486,10 @@ describe('parseConfig', () => {
               agentId: 'agent1',
               timeoutMs: 120_000,
               concurrency: 1,
+              requireToolCall: true,
+              fallbackToTextCapture: false,
+              safetyNetTimeoutMs: 60000,
+              maxSessionMs: 300000,
             },
           ],
         };
@@ -486,6 +515,10 @@ describe('parseConfig', () => {
               agentId: 'agent1',
               timeoutMs: 120_000,
               concurrency: 1,
+              requireToolCall: true,
+              fallbackToTextCapture: false,
+              safetyNetTimeoutMs: 60000,
+              maxSessionMs: 300000,
             },
           ],
         };
@@ -538,6 +571,10 @@ describe('parseConfig', () => {
               agentId: 'agent1',
               timeoutMs: 120_000,
               concurrency: 1,
+              requireToolCall: true,
+              fallbackToTextCapture: false,
+              safetyNetTimeoutMs: 60000,
+              maxSessionMs: 300000,
             },
             {
               name: 'rule2',
@@ -547,6 +584,10 @@ describe('parseConfig', () => {
               responseTopic: 'response-topic',
               timeoutMs: 120_000,
               concurrency: 1,
+              requireToolCall: true,
+              fallbackToTextCapture: false,
+              safetyNetTimeoutMs: 60000,
+              maxSessionMs: 300000,
             },
           ],
         };
@@ -568,6 +609,10 @@ describe('parseConfig', () => {
               responseTopic: 'input-topic', // совпадает с input topic!
               timeoutMs: 120_000,
               concurrency: 1,
+              requireToolCall: true,
+              fallbackToTextCapture: false,
+              safetyNetTimeoutMs: 60000,
+              maxSessionMs: 300000,
             },
           ],
         };
@@ -589,6 +634,10 @@ describe('parseConfig', () => {
               responseTopic: 'valid-response',
               timeoutMs: 120_000,
               concurrency: 1,
+              requireToolCall: true,
+              fallbackToTextCapture: false,
+              safetyNetTimeoutMs: 60000,
+              maxSessionMs: 300000,
             },
             {
               name: 'rule2',
@@ -598,6 +647,10 @@ describe('parseConfig', () => {
               responseTopic: 'topic-a', // конфликт!
               timeoutMs: 120_000,
               concurrency: 1,
+              requireToolCall: true,
+              fallbackToTextCapture: false,
+              safetyNetTimeoutMs: 60000,
+              maxSessionMs: 300000,
             },
           ],
         };
@@ -619,6 +672,10 @@ describe('parseConfig', () => {
               // responseTopic не указан (undefined)
               timeoutMs: 120_000,
               concurrency: 1,
+              requireToolCall: true,
+              fallbackToTextCapture: false,
+              safetyNetTimeoutMs: 60000,
+              maxSessionMs: 300000,
             },
           ],
         };
@@ -642,6 +699,10 @@ describe('parseConfig', () => {
               responseTopic: undefined, // undefined - не конфликт
               timeoutMs: 120_000,
               concurrency: 1,
+              requireToolCall: true,
+              fallbackToTextCapture: false,
+              safetyNetTimeoutMs: 60000,
+              maxSessionMs: 300000,
             },
           ],
         };

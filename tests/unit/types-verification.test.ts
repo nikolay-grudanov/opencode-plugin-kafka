@@ -23,11 +23,13 @@ describe('Type exports from schemas/index.ts (SC-008)', () => {
       name: 'test-rule',
       topic: 'test-topic',
       agent: 'test-agent',
+      prompt_field: '$',
     };
 
     expect(rule.name).toBe('test-rule');
     expect(rule.topic).toBe('test-topic');
     expect(rule.agent).toBe('test-agent');
+    expect(rule.prompt_field).toBe('$');
   });
 
   it('Rule type has optional fields that work correctly', () => {
@@ -50,13 +52,12 @@ describe('Type exports from schemas/index.ts (SC-008)', () => {
       name: 'test-rule',
       topic: 'test-topic',
       agent: 'test-agent',
+      prompt_field: '$',
     };
 
     expect(rule.condition).toBeUndefined();
     expect(rule.command).toBeUndefined();
-    // Note: prompt_field default '$' is applied at PARSE time, not at object creation
-    // When creating objects directly, prompt_field is undefined unless explicitly set
-    expect(rule.prompt_field).toBeUndefined();
+    expect(rule.prompt_field).toBe('$');
   });
 
   it('RuleSchema.parse applies default for prompt_field', () => {
@@ -74,8 +75,8 @@ describe('Type exports from schemas/index.ts (SC-008)', () => {
     const config: PluginConfig = {
       topics: ['security', 'audit'],
       rules: [
-        { name: 'r1', topic: 'security', agent: 'a1' },
-        { name: 'r2', topic: 'audit', agent: 'a2' },
+        { name: 'r1', topic: 'security', agent: 'a1', prompt_field: '$' },
+        { name: 'r2', topic: 'audit', agent: 'a2', prompt_field: '$' },
       ],
     };
 

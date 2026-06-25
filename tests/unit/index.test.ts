@@ -56,6 +56,7 @@ vi.mock('../../src/opencode/event-handler.js', () => ({
 import { parseConfigV003 } from '../../src/core/config.js';
 import { startConsumer } from '../../src/kafka/consumer.js';
 import { OpenCodeAgentAdapter } from '../../src/opencode/OpenCodeAgentAdapter.js';
+import { createTestConfig, createTestRule } from './helpers/testConfig.js';
 
 import type { PluginContext } from '../../src/types/opencode-plugin.d.ts';
 
@@ -90,17 +91,10 @@ describe('plugin', () => {
 
   describe('Should create OpenCodeAgentAdapter with context.client (tool-based mode)', () => {
     it('should create adapter instance with SDK client in tool-based mode (default)', async () => {
-      const validConfig = {
+      const validConfig = createTestConfig({
         topics: ['topic1'],
-        rules: [
-          {
-            name: 'rule1',
-            jsonPath: '$.task',
-            promptTemplate: 'Do: ${$.task}',
-            agentId: 'agent1',
-          },
-        ],
-      };
+        rules: [createTestRule({ name: 'rule1', jsonPath: '$.task', promptTemplate: 'Do: ${$.task}', agentId: 'agent1' })],
+      });
 
       vi.mocked(parseConfigV003).mockReturnValue(validConfig as never);
       // startConsumer now returns a never-resolving promise (background task)
@@ -113,22 +107,11 @@ describe('plugin', () => {
     });
 
     it('should create adapter in polling mode when toggles.pollingFallback=true', async () => {
-      const validConfig = {
+      const validConfig = createTestConfig({
         topics: ['topic1'],
-        rules: [
-          {
-            name: 'rule1',
-            jsonPath: '$.task',
-            promptTemplate: 'Do: ${$.task}',
-            agentId: 'agent1',
-          },
-        ],
-        toggles: {
-          toolDelivery: false,
-          eventHook: false,
-          pollingFallback: true,
-        },
-      };
+        rules: [createTestRule({ name: 'rule1', jsonPath: '$.task', promptTemplate: 'Do: ${$.task}', agentId: 'agent1' })],
+        toggles: { toolDelivery: false, eventHook: false, pollingFallback: true },
+      });
 
       vi.mocked(parseConfigV003).mockReturnValue(validConfig as never);
       vi.mocked(startConsumer).mockReturnValue(new Promise(() => {}) as never);
@@ -142,17 +125,10 @@ describe('plugin', () => {
 
   describe('Should start Kafka consumer in background', () => {
     it('should call startConsumer without awaiting (consumer is a background task)', async () => {
-      const validConfig = {
+      const validConfig = createTestConfig({
         topics: ['topic1'],
-        rules: [
-          {
-            name: 'rule1',
-            jsonPath: '$.task',
-            promptTemplate: 'Do: ${$.task}',
-            agentId: 'agent1',
-          },
-        ],
-      };
+        rules: [createTestRule({ name: 'rule1', jsonPath: '$.task', promptTemplate: 'Do: ${$.task}', agentId: 'agent1' })],
+      });
 
       vi.mocked(parseConfigV003).mockReturnValue(validConfig as never);
       vi.mocked(startConsumer).mockReturnValue(new Promise(() => {}) as never);
@@ -168,17 +144,10 @@ describe('plugin', () => {
 
   describe('Should return plugin hooks object', () => {
     it('should return hooks with session.error handler (already implemented for ADR-005)', async () => {
-      const validConfig = {
+      const validConfig = createTestConfig({
         topics: ['topic1'],
-        rules: [
-          {
-            name: 'rule1',
-            jsonPath: '$.task',
-            promptTemplate: 'Do: ${$.task}',
-            agentId: 'agent1',
-          },
-        ],
-      };
+        rules: [createTestRule({ name: 'rule1', jsonPath: '$.task', promptTemplate: 'Do: ${$.task}', agentId: 'agent1' })],
+      });
 
       vi.mocked(parseConfigV003).mockReturnValue(validConfig as never);
       vi.mocked(startConsumer).mockReturnValue(new Promise(() => {}) as never);
@@ -193,18 +162,10 @@ describe('plugin', () => {
     });
 
     it('should register send_to_kafka tool per rule when toggles.toolDelivery=true (default)', async () => {
-      const validConfig = {
+      const validConfig = createTestConfig({
         topics: ['topic1'],
-        rules: [
-          {
-            name: 'rule-with-response',
-            jsonPath: '$.task',
-            promptTemplate: 'Do: ${$.task}',
-            agentId: 'agent1',
-            responseTopic: 'opencode.responses',
-          },
-        ],
-      };
+        rules: [createTestRule({ name: 'rule-with-response', jsonPath: '$.task', promptTemplate: 'Do: ${$.task}', agentId: 'agent1', responseTopic: 'opencode.responses' })],
+      });
 
       vi.mocked(parseConfigV003).mockReturnValue(validConfig as never);
       vi.mocked(startConsumer).mockReturnValue(new Promise(() => {}) as never);
@@ -219,23 +180,11 @@ describe('plugin', () => {
     });
 
     it('should NOT register tools when toggles.toolDelivery=false', async () => {
-      const validConfig = {
+      const validConfig = createTestConfig({
         topics: ['topic1'],
-        rules: [
-          {
-            name: 'rule1',
-            jsonPath: '$.task',
-            promptTemplate: 'Do: ${$.task}',
-            agentId: 'agent1',
-            responseTopic: 'opencode.responses',
-          },
-        ],
-        toggles: {
-          toolDelivery: false,
-          eventHook: false,
-          pollingFallback: true, // need at least one delivery path
-        },
-      };
+        rules: [createTestRule({ name: 'rule1', jsonPath: '$.task', promptTemplate: 'Do: ${$.task}', agentId: 'agent1', responseTopic: 'opencode.responses' })],
+        toggles: { toolDelivery: false, eventHook: false, pollingFallback: true },
+      });
 
       vi.mocked(parseConfigV003).mockReturnValue(validConfig as never);
       vi.mocked(startConsumer).mockReturnValue(new Promise(() => {}) as never);

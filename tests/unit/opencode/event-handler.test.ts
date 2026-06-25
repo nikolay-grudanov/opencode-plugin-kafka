@@ -28,35 +28,26 @@ import {
 } from '../../../src/opencode/session-watchers.js';
 import type { PluginConfigV003, RuleV003 } from '../../../src/schemas/index.js';
 import type { Producer } from 'kafkajs';
+import { createTestConfig, createTestRule } from '../helpers/testConfig.js';
 
 const mockResponseSend = vi.fn().mockResolvedValue(undefined);
 const mockDlqSend = vi.fn().mockResolvedValue(undefined);
 const mockResponseProducer = { send: mockResponseSend } as unknown as Producer;
 const mockDlqProducer = { send: mockDlqSend } as unknown as Producer;
 
-const testRule: RuleV003 = {
+const testRule: RuleV003 = createTestRule({
   name: 'rule-x',
   jsonPath: '$.t',
   promptTemplate: 'do ${$.t}',
   agentId: 'agent-x',
   responseTopic: 'topic-x',
   timeoutMs: 120_000,
-  concurrency: 1,
-  requireToolCall: true,
-  fallbackToTextCapture: false,
-  safetyNetTimeoutMs: 60_000,
-  maxSessionMs: 300_000,
-};
+});
 
-const testConfig: PluginConfigV003 = {
+const testConfig = createTestConfig({
   topics: ['t1'],
   rules: [testRule],
-  toggles: {
-    toolDelivery: true,
-    eventHook: true,
-    pollingFallback: false,
-  },
-};
+});
 
 describe('createEventHandler', () => {
   beforeEach(() => {

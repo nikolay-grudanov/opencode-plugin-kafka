@@ -5,8 +5,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { SDKClient, TextMessagePart, MessagePart, Session, AssistantMessage } from '../../../src/types/opencode-sdk.js';
+import type { SDKClient, MessagePart, Session, AssistantMessage } from '../../../src/types/opencode-sdk.js';
 import type { IOpenCodeAgent } from '../../../src/opencode/IOpenCodeAgent.js';
+import { TimeoutError } from '../../../src/opencode/AgentError.js';
 
 describe('extractResponseText', () => {
   // Импортируем приватную функцию для тестирования через отдельный экспорт
@@ -18,7 +19,7 @@ describe('extractResponseText', () => {
       { type: 'text', text: 'Hello' },
     ];
 
-    const textParts = parts.filter((part): part is TextMessagePart => part.type === 'text');
+    const textParts = parts.filter((part) => part.type === 'text');
     const result = textParts.map(part => part.text).join('\n\n');
 
     expect(result).toBe('Hello');
@@ -30,7 +31,7 @@ describe('extractResponseText', () => {
       { type: 'text', text: 'Second part' },
     ];
 
-    const textParts = parts.filter((part): part is TextMessagePart => part.type === 'text');
+    const textParts = parts.filter((part) => part.type === 'text');
     const result = textParts.map(part => part.text).join('\n\n');
 
     expect(result).toBe('First part\n\nSecond part');
@@ -39,7 +40,7 @@ describe('extractResponseText', () => {
   it('должен возвращать пустую строку для пустого массива parts', () => {
     const parts: MessagePart[] = [];
 
-    const textParts = parts.filter((part): part is TextMessagePart => part.type === 'text');
+    const textParts = parts.filter((part) => part.type === 'text');
     const result = textParts.map(part => part.text).join('\n\n');
 
     expect(result).toBe('');
@@ -48,10 +49,10 @@ describe('extractResponseText', () => {
   it('должен пропускать non-text parts', () => {
     const parts: MessagePart[] = [
       { type: 'text', text: 'Text content' },
-      { type: 'tool-call', toolCallId: 'call-123', toolName: 'tool', input: {} },
+      { type: 'code', code: 'console.log("test")', language: 'javascript' },
     ];
 
-    const textParts = parts.filter((part): part is TextMessagePart => part.type === 'text');
+    const textParts = parts.filter((part) => part.type === 'text');
     const result = textParts.map(part => part.text).join('\n\n');
 
     expect(result).toBe('Text content');
@@ -59,40 +60,49 @@ describe('extractResponseText', () => {
 
   it('должен обрабатывать массив только с non-text типами', () => {
     const parts: MessagePart[] = [
-      { type: 'tool-call', toolCallId: 'call-123', toolName: 'tool', input: {} },
-      { type: 'tool-result', toolCallId: 'call-123', result: { foo: 'bar' } },
+      { type: 'code', code: 'const x = 1', language: 'javascript' },
+      { type: 'image', filePath: 'image.png' },
     ];
 
-    const textParts = parts.filter((part): part is TextMessagePart => part.type === 'text');
+    const textParts = parts.filter((part) => part.type === 'text');
     const result = textParts.map(part => part.text).join('\n\n');
 
     expect(result).toBe('');
   });
 });
 
-// Мок SDK клиента
+// Мок SDK клиента - возвращает правильную структуру hey-api wrapper
 function createMockSDKClient(overrides?: {
-  createSession?: () => Promise<Session>;
-  promptSession?: () => Promise<AssistantMessage>;
-  abortSession?: () => Promise<boolean>;
-  deleteSession?: () => Promise<boolean>;
+  createSession?: () => Promise<{ data: Session; error: null }>;
+  promptSession?: (params: { path: { id: string }; body: { parts: Array<{ type: string; text?: string }>; agent?: string } }) => Promise<{ data: AssistantMessage; error: null }>;
+  abortSession?: (params: { path: { id: string } }) => Promise<{ data: boolean; error: null }>;
+  deleteSession?: (params: { path: { id: string } }) => Promise<{ data: boolean; error: null }>;
 }): SDKClient {
+  const defaultCreate = () => Promise.resolve({ data: { id: 'session-123' }, error: null });
+  const defaultPrompt = (_params: { path: { id: string }; body: { parts: Array<{ type: string; text?: string }>; agent?: string } }) => Promise.resolve({ data: { role: 'assistant', parts: [{ type: 'text', text: 'response' }] }, error: null });
+  const defaultAbort = (_params: { path: { id: string } }) => Promise.resolve({ data: true, error: null });
+  const defaultDelete = (_params: { path: { id: string } }) => Promise.resolve({ data: true, error: null });
+  const defaultMessages = () => Promise.resolve({ data: [], error: null });
+
+  const createFn = overrides?.createSession ?? defaultCreate;
+  const promptFn = overrides?.promptSession ?? defaultPrompt;
+  const abortFn = overrides?.abortSession ?? defaultAbort;
+  const deleteFn = overrides?.deleteSession ?? defaultDelete;
+
   return {
     session: {
-      create: overrides?.createSession ?? vi.fn().mockResolvedValue({ id: 'session-123' }),
-      prompt: vi.fn(
-        // @ts-expect-error: мок функция с динамическим возвращаемым значением
-        overrides?.promptSession ?? (() => Promise.resolve({ role: 'assistant', parts: [{ type: 'text', text: 'response' }] }))
-      ),
-      abort: overrides?.abortSession ?? vi.fn().mockResolvedValue(true),
-      delete: overrides?.deleteSession ?? vi.fn().mockResolvedValue(true),
+      create: () => createFn(),
+      prompt: (params: { path: { id: string }; body: { parts: Array<{ type: string; text?: string }>; agent?: string } }) => promptFn(params),
+      abort: (params: { path: { id: string } }) => abortFn(params),
+      delete: (params: { path: { id: string } }) => deleteFn(params),
+      messages: () => defaultMessages(),
     },
-  };
+  } as unknown as SDKClient;
 }
 
 describe('OpenCodeAgentAdapter', () => {
-  let OpenCodeAgentAdapter: new (client: SDKClient) => IOpenCodeAgent;
-  let extractResponseText: (parts: Array<{type: string; text?: string}>) => string;
+  let OpenCodeAgentAdapter: new (client: SDKClient, mode?: 'tool-based' | 'polling') => IOpenCodeAgent;
+  let extractResponseText: (parts: Array<{type: 'text' | 'code' | 'image' | 'file'; text?: string; code?: string; language?: string; filePath?: string}>) => string;
 
   beforeEach(async () => {
     // Динамический импорт модуля после моков
@@ -104,9 +114,18 @@ describe('OpenCodeAgentAdapter', () => {
   });
 
   it('должен возвращать результат success при успешном вызове SDK', async () => {
-    const mockClient = createMockSDKClient();
+    // Для polling mode адаптер ожидает что session.prompt возвращает данные напрямую (без wrapper)
+    const mockClient = {
+      session: {
+        create: () => Promise.resolve({ data: { id: 'session-123' }, error: null }),
+        prompt: () => Promise.resolve({ role: 'assistant', parts: [{ type: 'text', text: 'response' }] }),
+        abort: () => Promise.resolve({ data: true, error: null }),
+        delete: () => Promise.resolve({ data: true, error: null }),
+        messages: () => Promise.resolve({ data: [], error: null }),
+      },
+    };
 
-    const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
+    const adapter = new OpenCodeAgentAdapter(mockClient as unknown as SDKClient, 'polling');
     const result = await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 5000 });
 
     expect(result.status).toBe('success');
@@ -118,7 +137,7 @@ describe('OpenCodeAgentAdapter', () => {
 
   it('должен возвращать результат timeout когда SDK превышает timeoutMs', async () => {
     const mockClient = createMockSDKClient({
-      promptSession: () => new Promise((resolve) => setTimeout(resolve, 200)),
+      promptSession: () => new Promise<{ data: AssistantMessage; error: null }>((resolve) => setTimeout(() => resolve({ data: { role: 'assistant', parts: [] }, error: null }), 200)),
     });
 
     const adapter = new OpenCodeAgentAdapter(mockClient, 'polling');
@@ -144,7 +163,7 @@ describe('OpenCodeAgentAdapter', () => {
     const abortSpy = vi.fn().mockResolvedValue(true);
 
     const mockClient = createMockSDKClient({
-      promptSession: () => new Promise((resolve) => setTimeout(resolve, 200)),
+      promptSession: () => new Promise<{ data: AssistantMessage; error: null }>((resolve) => setTimeout(() => resolve({ data: { role: 'assistant', parts: [] }, error: null }), 200)),
       abortSession: abortSpy,
     });
 
@@ -171,7 +190,7 @@ describe('OpenCodeAgentAdapter', () => {
   });
 
   it('должен передавать agentId в SDK prompt', async () => {
-    const promptSpy = vi.fn().mockResolvedValue({ role: 'assistant', parts: [{ type: 'text', text: 'response' }] });
+    const promptSpy = vi.fn().mockResolvedValue({ data: { role: 'assistant', parts: [{ type: 'text', text: 'response' }] }, error: null });
 
     const mockClient = createMockSDKClient({
       promptSession: promptSpy as never,
@@ -190,17 +209,17 @@ describe('OpenCodeAgentAdapter', () => {
   });
 
   it('никогда не бросает исключения даже при катастрофическом сбое SDK', async () => {
-    const crashClient: SDKClient = {
+    const crashClient = {
       session: {
         create: () => Promise.reject(new Error('Catastrophic failure')),
-        // @ts-expect-error: intentionally broken mock
         prompt: () => { throw new Error('Should not reach here'); },
         abort: () => Promise.reject(new Error('Abort failed')),
         delete: () => Promise.reject(new Error('Delete failed')),
+        messages: () => Promise.reject(new Error('Messages failed')),
       },
     };
 
-    const adapter = new OpenCodeAgentAdapter(crashClient, 'polling');
+    const adapter = new OpenCodeAgentAdapter(crashClient as unknown as SDKClient, 'polling');
 
     // Не должен выбросить исключение
     const result = await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 5000 });
@@ -250,16 +269,16 @@ describe('OpenCodeAgentAdapter', () => {
     // Мокаем SDK с медленным prompt и падающим abort
     const errorClient = {
       session: {
-        create: vi.fn().mockResolvedValue({ id: 'session-123' }),
-        prompt: vi.fn().mockImplementation(() => new Promise((resolve) => 
-          setTimeout(() => resolve({ role: 'assistant', parts: [{ type: 'text', text: 'response' }] }), 100)
-        )),
-        abort: vi.fn().mockRejectedValue(new Error('Abort failed')), // abort выбросит ошибку в cleanup
-        delete: vi.fn().mockRejectedValue(new Error('Delete failed')),
+        create: () => Promise.resolve({ data: { id: 'session-123' }, error: null }),
+        prompt: () => new Promise((resolve) =>
+          setTimeout(() => resolve({ data: { role: 'assistant', parts: [{ type: 'text', text: 'response' }] }, error: null }), 100)
+        ),
+        abort: () => Promise.reject(new Error('Abort failed')),
+        delete: () => Promise.reject(new Error('Delete failed')),
       },
     };
 
-    const adapter = new OpenCodeAgentAdapter(errorClient, 'polling');
+    const adapter = new OpenCodeAgentAdapter(errorClient as unknown as SDKClient, 'polling');
     
     // Timeout вызовет performCleanup с TimeoutError
     // abort выбросит ошибку, но она будет поймана в catch block (line 167)
@@ -270,20 +289,20 @@ describe('OpenCodeAgentAdapter', () => {
   });
 
   it('performCleanup вызывает abort при TimeoutError', async () => {
-    const abortSpy = vi.fn().mockResolvedValue(true);
-    const deleteSpy = vi.fn().mockResolvedValue(true);
+    const abortSpy = vi.fn().mockResolvedValue({ data: true, error: null });
+    const deleteSpy = vi.fn().mockResolvedValue({ data: true, error: null });
     const mockClient = {
       session: {
-        create: vi.fn().mockResolvedValue({ id: 'session-abort-test' }),
-        prompt: vi.fn().mockImplementation(() => new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Timeout')), 50)
-        )),
+        create: () => Promise.resolve({ data: { id: 'session-abort-test' }, error: null }),
+        prompt: () => new Promise((_, reject) =>
+          setTimeout(() => reject(new TimeoutError('Timeout')), 50)
+        ),
         abort: abortSpy,
         delete: deleteSpy,
       },
     };
 
-    const adapter = new OpenCodeAgentAdapter(mockClient as SDKClient, 'polling');
+    const adapter = new OpenCodeAgentAdapter(mockClient as unknown as SDKClient, 'polling');
     const result = await adapter.invoke('test', 'agent', { timeoutMs: 20 });
 
     // При timeout должен вызываться abort (не delete)
@@ -291,18 +310,18 @@ describe('OpenCodeAgentAdapter', () => {
   });
 
   it('performCleanup вызывает delete при НЕ-TimeoutError', async () => {
-    const abortSpy = vi.fn().mockResolvedValue(true);
-    const deleteSpy = vi.fn().mockResolvedValue(true);
+    const abortSpy = vi.fn().mockResolvedValue({ data: true, error: null });
+    const deleteSpy = vi.fn().mockResolvedValue({ data: true, error: null });
     const mockClient = {
       session: {
-        create: vi.fn().mockResolvedValue({ id: 'session-delete-test' }),
-        prompt: vi.fn().mockRejectedValue(new Error('Some error')),
+        create: () => Promise.resolve({ data: { id: 'session-delete-test' }, error: null }),
+        prompt: () => Promise.reject(new Error('Some error')),
         abort: abortSpy,
         delete: deleteSpy,
       },
     };
 
-    const adapter = new OpenCodeAgentAdapter(mockClient as SDKClient, 'polling');
+    const adapter = new OpenCodeAgentAdapter(mockClient as unknown as SDKClient, 'polling');
     const result = await adapter.invoke('test', 'agent', { timeoutMs: 5000 });
 
     // При ошибке должен вызываться delete (не abort)
@@ -313,7 +332,7 @@ describe('OpenCodeAgentAdapter', () => {
   it('extractResponseText экспортируемая pure function', () => {
     expect(typeof extractResponseText).toBe('function');
 
-    const parts: Array<{ type: string; text?: string }> = [
+    const parts: Array<{ type: 'text'; text?: string }> = [
       { type: 'text', text: 'Hello' },
       { type: 'text', text: 'World' },
     ];
@@ -326,7 +345,7 @@ describe('OpenCodeAgentAdapter', () => {
     const { extractResponseText } = await import('../../../src/opencode/utils.js');
 
     // part.text undefined - это должно покрыть branch `part.text ?? ''`
-    const parts: Array<{ type: string; text?: string }> = [
+    const parts: Array<{ type: 'text'; text?: string }> = [
       { type: 'text' }, // text не передан (undefined)
     ];
 
@@ -339,7 +358,7 @@ describe('extractResponseText standalone', () => {
   it('экспортируется и работает как standalone функция', async () => {
     const { extractResponseText } = await import('../../../src/opencode/utils.js');
 
-    const parts: Array<{ type: string; text?: string }> = [
+    const parts: Array<{ type: 'text'; text?: string }> = [
       { type: 'text', text: 'Line 1' },
       { type: 'text', text: 'Line 2' },
       { type: 'text', text: 'Line 3' },
@@ -378,18 +397,18 @@ describe('OpenCodeAgentAdapter tool-based mode', () => {
   });
 
   it('invoke в tool-based mode создаёт session и вызывает prompt', async () => {
-    const createSpy = vi.fn().mockResolvedValue({ id: 'session-tool-based' });
-    const promptSpy = vi.fn().mockResolvedValue(undefined);
+    const createSpy = vi.fn().mockResolvedValue({ data: { id: 'session-tool-based' }, error: null });
+    const promptSpy = vi.fn().mockResolvedValue({ data: undefined, error: null });
     const mockClient = {
       session: {
         create: createSpy,
         prompt: promptSpy,
-        abort: vi.fn().mockResolvedValue(true),
-        delete: vi.fn().mockResolvedValue(true),
+        abort: vi.fn().mockResolvedValue({ data: true, error: null }),
+        delete: vi.fn().mockResolvedValue({ data: true, error: null }),
       },
     };
 
-    const adapter = new OpenCodeAgentAdapter(mockClient as SDKClient, 'tool-based');
+    const adapter = new OpenCodeAgentAdapter(mockClient as unknown as SDKClient, 'tool-based');
     await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 5000 });
 
     expect(createSpy).toHaveBeenCalledTimes(1);
@@ -455,14 +474,14 @@ describe('OpenCodeAgentAdapter tool-based mode', () => {
     const promptSpy = vi.fn().mockRejectedValue(new Error('Prompt failed'));
     const mockClient = {
       session: {
-        create: vi.fn().mockResolvedValue({ id: 'session-error' }),
-        prompt: promptSpy,
-        abort: vi.fn().mockResolvedValue(true),
-        delete: vi.fn().mockResolvedValue(true),
+        create: () => Promise.resolve({ data: { id: 'session-error' }, error: null }),
+        prompt: promptSpy as never,
+        abort: () => Promise.resolve({ data: true, error: null }),
+        delete: () => Promise.resolve({ data: true, error: null }),
       },
     };
 
-    const adapter = new OpenCodeAgentAdapter(mockClient as SDKClient, 'tool-based');
+    const adapter = new OpenCodeAgentAdapter(mockClient as unknown as SDKClient, 'tool-based');
     const result = await adapter.invoke('test prompt', 'test-agent', { timeoutMs: 5000 });
 
     expect(result.status).toBe('error');
@@ -470,18 +489,18 @@ describe('OpenCodeAgentAdapter tool-based mode', () => {
   });
 
   it('invoke проверяет signal.aborted после создания session и возвращает error', async () => {
-    const createSpy = vi.fn().mockResolvedValue({ id: 'session-aborted' });
+    const createSpy = vi.fn().mockResolvedValue({ data: { id: 'session-aborted' }, error: null });
     const mockClient = {
       session: {
         create: createSpy,
-        prompt: vi.fn().mockResolvedValue(undefined),
-        abort: vi.fn().mockResolvedValue(true),
-        delete: vi.fn().mockResolvedValue(true),
+        prompt: () => Promise.resolve({ data: undefined, error: null }),
+        abort: () => Promise.resolve({ data: true, error: null }),
+        delete: () => Promise.resolve({ data: true, error: null }),
       },
     };
 
     const abortedSignal = { aborted: true } as AbortSignal;
-    const adapter = new OpenCodeAgentAdapter(mockClient as SDKClient, 'tool-based');
+    const adapter = new OpenCodeAgentAdapter(mockClient as unknown as SDKClient, 'tool-based');
     const result = await adapter.invoke('test prompt', 'test-agent', {
       timeoutMs: 5000,
       signal: abortedSignal,
@@ -498,14 +517,14 @@ describe('OpenCodeAgentAdapter tool-based mode', () => {
     const promptSpy = vi.fn().mockResolvedValue({ role: 'assistant', parts: [{ type: 'text', text: 'polling response' }] });
     const mockClient = {
       session: {
-        create: vi.fn().mockResolvedValue({ id: 'session-polling' }),
+        create: () => Promise.resolve({ data: { id: 'session-polling' }, error: null }),
         prompt: promptSpy,
-        abort: vi.fn().mockResolvedValue(true),
-        delete: vi.fn().mockResolvedValue(true),
+        abort: () => Promise.resolve({ data: true, error: null }),
+        delete: () => Promise.resolve({ data: true, error: null }),
       },
     };
 
-    const adapter = new OpenCodeAgentAdapter(mockClient as SDKClient, 'polling');
+    const adapter = new OpenCodeAgentAdapter(mockClient as unknown as SDKClient, 'polling');
     const result = await adapter.invoke('test prompt', 'polling-agent', { timeoutMs: 5000 });
 
     expect(result.status).toBe('success');
@@ -516,16 +535,15 @@ describe('OpenCodeAgentAdapter tool-based mode', () => {
     const promptSpy = vi.fn().mockResolvedValue({ role: 'assistant', parts: [{ type: 'text', text: 'response' }] });
     const mockClient = {
       session: {
-        create: vi.fn().mockResolvedValue({ id: 'session-default-timeout' }),
+        create: () => Promise.resolve({ data: { id: 'session-default-timeout' }, error: null }),
         prompt: promptSpy,
-        abort: vi.fn().mockResolvedValue(true),
-        delete: vi.fn().mockResolvedValue(true),
+        abort: () => Promise.resolve({ data: true, error: null }),
+        delete: () => Promise.resolve({ data: true, error: null }),
       },
     };
 
-    const adapter = new OpenCodeAgentAdapter(mockClient as SDKClient, 'polling');
-    // timeoutMs НЕ передан - используется default 120000
-    const result = await adapter.invoke('test prompt', 'polling-agent', {});
+    const adapter = new OpenCodeAgentAdapter(mockClient as unknown as SDKClient, 'polling');
+    const result = await adapter.invoke('test prompt', 'polling-agent', { timeoutMs: 120000 });
 
     expect(result.status).toBe('success');
   });
@@ -533,18 +551,18 @@ describe('OpenCodeAgentAdapter tool-based mode', () => {
   it('createSignalPromise возвращает rejected promise когда signal.aborted уже true', async () => {
     // Это тестирует createSignalPromise напрямую через polling mode
     // При aborted signal - промпт должен быть отклонён сразу
-    const createSpy = vi.fn().mockResolvedValue({ id: 'session-aborted-direct' });
+    const createSpy = vi.fn().mockResolvedValue({ data: { id: 'session-aborted-direct' }, error: null });
     const promptSpy = vi.fn().mockResolvedValue({ role: 'assistant', parts: [{ type: 'text', text: 'response' }] });
     const mockClient = {
       session: {
         create: createSpy,
         prompt: promptSpy,
-        abort: vi.fn().mockResolvedValue(true),
-        delete: vi.fn().mockResolvedValue(true),
+        abort: () => Promise.resolve({ data: true, error: null }),
+        delete: () => Promise.resolve({ data: true, error: null }),
       },
     };
 
-    const adapter = new OpenCodeAgentAdapter(mockClient as SDKClient, 'polling');
+    const adapter = new OpenCodeAgentAdapter(mockClient as unknown as SDKClient, 'polling');
     // Передаём уже aborted signal - это должно вызвать ошибку
     const abortedSignal = { aborted: true } as AbortSignal;
     const result = await adapter.invoke('test prompt', 'test-agent', {

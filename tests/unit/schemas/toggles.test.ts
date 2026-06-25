@@ -9,20 +9,12 @@
 import { describe, it, expect } from 'vitest';
 import { PluginConfigV003Schema } from '../../../src/schemas/index.js';
 import { validateToggles, parseConfigV003 } from '../../../src/core/config.js';
-
-const validRules = [
-  {
-    name: 'r1',
-    jsonPath: '$.t',
-    promptTemplate: 'do ${$.t}',
-    agentId: 'a1',
-  },
-];
+import { createTestRule } from '../helpers/testConfig.js';
 
 function makeConfig(toggles: Record<string, boolean> | undefined) {
   return {
     topics: ['t1'],
-    rules: validRules,
+    rules: [createTestRule({ name: 'r1', jsonPath: '$.t', promptTemplate: 'do ${$.t}', agentId: 'a1' })],
     ...(toggles ? { toggles } : {}),
   };
 }

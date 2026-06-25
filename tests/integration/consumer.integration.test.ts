@@ -16,6 +16,7 @@ import { Kafka } from 'kafkajs';
 import { eachMessageHandler, performGracefulShutdown, startConsumer } from '../../src/kafka/consumer.js';
 import type { PluginConfigV003, RuleV003 } from '../../src/schemas/index.js';
 import type { IOpenCodeAgent } from '../../src/opencode/IOpenCodeAgent.js';
+import { createTestConfig, createTestRule } from '../unit/helpers/testConfig.js';
 
 // ============================================================================
 // Constants
@@ -50,14 +51,12 @@ const CONTAINER_STARTUP_TIMEOUT_MS = 120_000;
  * Базовый rule с обязательными полями для V003.
  * Используется как основа для всех test rules.
  */
-const baseRule: RuleV003 = {
+const baseRule = createTestRule({
   agentId: 'test-agent',
-  timeoutMs: 30_000,
-  concurrency: 1,
   name: '',
   jsonPath: '',
   promptTemplate: '',
-};
+});
 
 // ============================================================================
 // Types
@@ -153,13 +152,6 @@ function createTestState(): TestConsumerState {
     totalMessagesProcessed: 0,
     dlqMessagesCount: 0,
     lastDlqRateLogTime: Date.now(),
-  };
-}
-
-function createTestConfig(topics: string[], rules: RuleV003[]): PluginConfigV003 {
-  return {
-    topics,
-    rules,
   };
 }
 
@@ -322,7 +314,7 @@ describe('T007: Basic Message Production/Consumption', () => {
       promptTemplate: 'Process type {{type}}',
     };
 
-    const config = createTestConfig([TEST_TOPIC_1], [rule]);
+    const config = createTestConfig({ topics: [TEST_TOPIC_1], rules: [rule] });
     const state = createTestState();
 
     // Mock commit функция
@@ -428,7 +420,7 @@ describe('T009: Sequential Message Ordering', () => {
       promptTemplate: 'Process order {{order}}',
     };
 
-    const config = createTestConfig([TEST_TOPIC_2], [rule]);
+    const config = createTestConfig({ topics: [TEST_TOPIC_2], rules: [rule] });
     const state = createTestState();
 
     // Отправляем 3 сообщения в определённом порядке через producer
@@ -531,7 +523,7 @@ describe('T010: Invalid JSON → DLQ', () => {
       promptTemplate: 'Process type {{type}}',
     };
 
-    const config = createTestConfig([TEST_TOPIC_1], [rule]);
+    const config = createTestConfig({ topics: [TEST_TOPIC_1], rules: [rule] });
     const state = createTestState();
 
     // Mock commit функция
@@ -638,7 +630,7 @@ describe('T011: Oversized Message → DLQ', () => {
       promptTemplate: 'Process type {{type}}',
     };
 
-    const config = createTestConfig([TEST_TOPIC_1], [rule]);
+    const config = createTestConfig({ topics: [TEST_TOPIC_1], rules: [rule] });
     const state = createTestState();
 
     // Mock commit функция
@@ -703,7 +695,7 @@ describe('T012: Unmatched Message — Skip Gracefully', () => {
       promptTemplate: 'Process {{type}}',
     };
 
-    const config = createTestConfig([TEST_TOPIC_1], [rule]);
+    const config = createTestConfig({ topics: [TEST_TOPIC_1], rules: [rule] });
     const state = createTestState();
 
     // Mock commit функция
@@ -1118,15 +1110,14 @@ describe.skipIf(!containerAvailable)('T019: startConsumer Lifecycle', () => {
     await admin.disconnect();
 
     // Конфиг
-    const testConfig: PluginConfigV003 = {
+    const testConfig = createTestConfig({
       topics: [testTopic],
-      rules: [{
-        ...baseRule,
+      rules: [createTestRule({
         name: 'test-rule',
         jsonPath: '$.type',
         promptTemplate: 'Process {{type}}',
-      }],
-    };
+      })],
+    });
 
     // Отправляем тестовое сообщение
     const producer = kafka!.producer();
@@ -1175,10 +1166,10 @@ describe.skipIf(!containerAvailable)('T019: startConsumer Lifecycle', () => {
 
   it('T019: startConsumer должен выйти с кодом 1 при ошибке инициализации', async () => {
     // Arrange
-    const testConfig: PluginConfigV003 = {
+    const testConfig = createTestConfig({
       topics: ['non-existent-topic'],
       rules: [],
-    };
+    });
 
     // Устанавливаем невалидные env
     process.env.KAFKA_BROKERS = 'invalid-broker:9092';

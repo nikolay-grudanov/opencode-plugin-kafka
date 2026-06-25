@@ -13,18 +13,17 @@ import type { StartedTestContainer } from 'testcontainers';
 import { matchRuleV003 } from '../../src/core/routing';
 import { buildPromptV003 } from '../../src/core/prompt';
 import type { RuleV003 } from '../../src/schemas/index.js';
+import { createTestRule } from '../unit/helpers/testConfig.js';
 
 /**
  * Базовый rule с обязательными полями для V003.
  */
-const baseRule: RuleV003 = {
+const baseRule = createTestRule({
   agentId: 'test-agent',
-  timeoutMs: 30_000,
-  concurrency: 1,
   name: '',
   jsonPath: '',
   promptTemplate: '',
-};
+});
 
 describe('Integration Tests: Routing Flow (spec 003)', () => {
   let redpandaContainer: StartedTestContainer | null = null;
