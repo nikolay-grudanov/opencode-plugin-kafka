@@ -7,9 +7,10 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
-import type { PluginConfigV003, RuleV003 } from '../../src/schemas/index.js';
+import type { PluginConfigV003 } from '../../src/schemas/index.js';
 import type { EachMessagePayload, Producer } from 'kafkajs';
 import type { IOpenCodeAgent } from '../../src/opencode/IOpenCodeAgent.js';
+import { createTestConfig, createTestRule } from './helpers/testConfig.js';
 
 /**
  * Mock состояние consumer для тестов
@@ -51,21 +52,11 @@ describe('Agent Error/Timeout → DLQ', () => {
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     // Setup config with one matching rule
-    const rules: RuleV003[] = [
-      {
-        name: 'test-rule',
-        jsonPath: '$.test',
-        promptTemplate: 'Process: ${$}',
-        agentId: 'test-agent',
-        timeoutMs: 30000,
-        concurrency: 1,
-      },
+    const rules = [
+      createTestRule({ name: 'test-rule', jsonPath: '$.test', promptTemplate: 'Process: ${$}' }),
     ];
 
-    mockConfig = {
-      topics: ['test-topic'],
-      rules: rules,
-    };
+    mockConfig = createTestConfig({ topics: ['test-topic'], rules });
 
     mockResponseProducer = {
       send: vi.fn().mockResolvedValue(undefined),

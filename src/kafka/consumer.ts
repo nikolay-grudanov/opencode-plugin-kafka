@@ -20,6 +20,7 @@ import {
 } from './client.js';
 import { sendResponse } from './response-producer.js';
 import type { IOpenCodeAgent, AgentResult } from '../opencode/IOpenCodeAgent.js';
+import { stopMaxSessionGuard } from '../opencode/event-handler.js';
 
 /**
  * Максимальный размер сообщения (1MB по умолчанию для KafkaJS).
@@ -297,9 +298,11 @@ export async function eachMessageHandler(
 
   const startTime = Date.now();
 
+  // Объявляем messageValue во внешнем scope для использования в catch
+  const messageValue = payload.message.value;
+
   try {
     // 1. Проверяем message value (null = tombstone)
-    const messageValue = payload.message.value;
     if (messageValue === null) {
       const ignoreTombstones = process.env.KAFKA_IGNORE_TOMBSTONES === 'true';
       if (ignoreTombstones) {
@@ -320,17 +323,13 @@ export async function eachMessageHandler(
       }
       // Default: отправляем tombstone в DLQ
       const error = new Error('Message value is null (tombstone message)');
-      await sendToDlq(
-        dlqProducer,
-        {
-          value: null,
-          topic: payload.topic,
-          partition: payload.partition,
-          offset: payload.message.offset,
-          originalKey: payload.message.key?.toString() ?? null,
-        },
-        error
-      );
+      await sendToDlq(dlqProducer, {
+        value: null,
+        topic: payload.topic,
+        partition: payload.partition,
+        offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
+      }, error, config.dlqTopic);
       state.dlqMessagesCount++;
       logDlqRate(state);
       await commitOffsets([
@@ -342,20 +341,14 @@ export async function eachMessageHandler(
     // 2. Валидируем размер сообщения (max 1MB)
     const messageSize = messageValue.length;
     if (messageSize > MAX_MESSAGE_SIZE_BYTES) {
-      const error = new Error(
-        `Message size (${messageSize} bytes) exceeds maximum (${MAX_MESSAGE_SIZE_BYTES} bytes)`
-      );
-      await sendToDlq(
-        dlqProducer,
-        {
-          value: messageValue.toString('utf-8'),
-          topic: payload.topic,
-          partition: payload.partition,
-          offset: payload.message.offset,
-          originalKey: payload.message.key?.toString() ?? null,
-        },
-        error
-      );
+      const error = new Error(`Message size (${messageSize} bytes) exceeds maximum (${MAX_MESSAGE_SIZE_BYTES} bytes)`);
+      await sendToDlq(dlqProducer, {
+        value: messageValue.toString('utf-8'),
+        topic: payload.topic,
+        partition: payload.partition,
+        offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
+      }, error, config.dlqTopic);
       state.dlqMessagesCount++;
       logDlqRate(state);
       await commitOffsets([
@@ -370,17 +363,13 @@ export async function eachMessageHandler(
       parsedPayload = JSON.parse(messageValue.toString('utf-8'));
     } catch (parseError) {
       const error = parseError instanceof Error ? parseError : new Error('Failed to parse JSON');
-      await sendToDlq(
-        dlqProducer,
-        {
-          value: messageValue.toString('utf-8'),
-          topic: payload.topic,
-          partition: payload.partition,
-          offset: payload.message.offset,
-          originalKey: payload.message.key?.toString() ?? null,
-        },
-        error
-      );
+      await sendToDlq(dlqProducer, {
+        value: messageValue.toString('utf-8'),
+        topic: payload.topic,
+        partition: payload.partition,
+        offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
+      }, error, config.dlqTopic);
       state.dlqMessagesCount++;
       logDlqRate(state);
       await commitOffsets([
@@ -395,17 +384,13 @@ export async function eachMessageHandler(
       matchedRule = matchRuleV003(parsedPayload, config.rules);
     } catch (matchError) {
       const error = matchError instanceof Error ? matchError : new Error('Failed to match rule');
-      await sendToDlq(
-        dlqProducer,
-        {
-          value: messageValue.toString('utf-8'),
-          topic: payload.topic,
-          partition: payload.partition,
-          offset: payload.message.offset,
-          originalKey: payload.message.key?.toString() ?? null,
-        },
-        error
-      );
+      await sendToDlq(dlqProducer, {
+        value: messageValue.toString('utf-8'),
+        topic: payload.topic,
+        partition: payload.partition,
+        offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
+      }, error, config.dlqTopic);
       state.dlqMessagesCount++;
       logDlqRate(state);
       await commitOffsets([
@@ -453,6 +438,8 @@ export async function eachMessageHandler(
     );
 
     // 7. Вызываем OpenCode агента (C2: AbortController для реальной отмены)
+    // C1: Передаём ruleName и responseTopic для корректной привязки к matched rule
+    // H3: Передаём Kafka message context для DLQ envelope
     const abortController = new AbortController();
     activeSessions?.add(abortController);
 
@@ -461,6 +448,12 @@ export async function eachMessageHandler(
       agentResult = await agent.invoke(prompt, matchedRule.agentId, {
         timeoutMs: matchedRule.timeoutMs ?? 120_000,
         signal: abortController.signal,
+        ruleName: matchedRule.name,
+        responseTopic: matchedRule.responseTopic,
+        kafkaMessageKey: payload.message.key?.toString() ?? null,
+        kafkaTopic: payload.topic,
+        kafkaPartition: payload.partition,
+        kafkaOffset: payload.message.offset,
       });
     } finally {
       activeSessions?.delete(abortController); // гарантированная очистка во всех путях
@@ -501,17 +494,13 @@ export async function eachMessageHandler(
       const errorReason = agentResult.status === 'timeout' ? 'Agent timeout' : 'Agent error';
       const errorMsg = agentResult.errorMessage ?? errorReason;
       const error = new Error(`Agent invoke failed: ${errorMsg} (status: ${agentResult.status})`);
-      await sendToDlq(
-        dlqProducer,
-        {
-          value: messageValue.toString('utf-8'),
-          topic: payload.topic,
-          partition: payload.partition,
-          offset: payload.message.offset,
-          originalKey: payload.message.key?.toString() ?? null,
-        },
-        error
-      );
+      await sendToDlq(dlqProducer, {
+        value: messageValue.toString('utf-8'),
+        topic: payload.topic,
+        partition: payload.partition,
+        offset: payload.message.offset,
+        originalKey: payload.message.key?.toString() ?? null,
+      }, error, config.dlqTopic);
       state.dlqMessagesCount++;
 
       console.error(
@@ -542,17 +531,13 @@ export async function eachMessageHandler(
     const errorMessage = error instanceof Error ? error.message : String(error);
     const dlqError = new Error(`Unexpected error in eachMessageHandler: ${errorMessage}`);
 
-    await sendToDlq(
-      dlqProducer,
-      {
-        value: payload.message.value?.toString('utf-8') ?? null,
-        topic: payload.topic,
-        partition: payload.partition,
-        offset: payload.message.offset,
-        originalKey: payload.message.key?.toString() ?? null,
-      },
-      dlqError
-    );
+    await sendToDlq(dlqProducer, {
+      value: messageValue !== null ? messageValue.toString('utf-8') : null,
+      topic: payload.topic,
+      partition: payload.partition,
+      offset: payload.message.offset,
+      originalKey: payload.message.key?.toString() ?? null,
+    }, dlqError, config.dlqTopic);
 
     state.dlqMessagesCount++;
     logDlqRate(state);
@@ -630,6 +615,13 @@ export async function performGracefulShutdown(
       timestamp: new Date().toISOString(),
     })
   );
+
+  // C2: Останавливаем maxSession guard interval перед abort sessions
+  try {
+    stopMaxSessionGuard();
+  } catch {
+    // Best-effort — игнорируем ошибки остановки
+  }
 
   const startTime = Date.now();
 

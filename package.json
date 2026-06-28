@@ -5,6 +5,10 @@
   "scripts": {
     "build": "tsc",
     "check": "npm run lint && npm run test",
+    "demo": "node scripts/demo-simple.mjs",
+    "demo:e2e": "node scripts/demo-e2e-flow.mjs",
+    "demo:full": "node scripts/demo-full.mjs",
+    "demo:ssl": "node scripts/demo-ssl.mjs",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "vitest run --dangerouslyIgnoreUnhandledErrors",
@@ -16,6 +20,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@opencode-ai/plugin": "1.17.10",
     "jsonpath-plus": "^10.4.0",
     "kafkajs": "^2.2.4",
     "opencode-glm-quota": "^1.7.0",
@@ -27,7 +32,7 @@
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^8.59.0",
     "@typescript-eslint/parser": "^8.59.0",
-    "@vitest/coverage-v8": "^2.0.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "eslint": "^10.2.1",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
@@ -35,6 +40,6 @@
     "testcontainers": "^11.14.0",
     "tsd": "^0.33.0",
     "typescript": "^6.0.3",
-    "vitest": "^2.0.0"
+    "vitest": "^2.1.9"
   }
 }

@@ -12,6 +12,8 @@ vi.mock('../../../src/kafka/consumer.js', () => ({
 
 import { runPlugin, type KafkaConnectionSettings } from '../../e2e/helpers/pluginRunner.js';
 import { startConsumer } from '../../../src/kafka/consumer.js';
+import type { PluginConfigV003 } from '../../../src/schemas/index.js';
+import { createTestConfig } from './testConfig.js';
 
 describe('pluginRunner', () => {
   // Сохраняем оригинальный process.exit для восстановления
@@ -57,7 +59,7 @@ describe('pluginRunner', () => {
         vi.mocked(startConsumer).mockResolvedValue(undefined);
 
         // Запускаем плагин — это должно перехватить process.exit
-        await runPlugin({ topics: ['test'], rules: [] }, mockAgent, baseConnection);
+        await runPlugin(createTestConfig({ rules: [] }) as unknown as PluginConfigV003, mockAgent, baseConnection);
 
         // Проверяем что process.exit был перехвачен (т.е. это уже не оригинальная функция)
         expect(process.exit).not.toBe(originalExit);
@@ -66,7 +68,7 @@ describe('pluginRunner', () => {
       it('должен вызывать exit handler без завершения процесса', async () => {
         vi.mocked(startConsumer).mockResolvedValue(undefined);
 
-        await runPlugin({ topics: ['test'], rules: [] }, mockAgent, baseConnection);
+        await runPlugin(createTestConfig({ rules: [] }) as unknown as PluginConfigV003, mockAgent, baseConnection);
 
         // Вызываем перехваченный exit — он не должен завершить процесс
         let reachedHere = false;
@@ -92,7 +94,7 @@ describe('pluginRunner', () => {
         const originalBrokers = 'original-broker:9092';
         process.env.KAFKA_BROKERS = originalBrokers;
 
-        const handle = await runPlugin({ topics: ['test'], rules: [] }, mockAgent, baseConnection);
+        const handle = await runPlugin(createTestConfig({ rules: [] }) as unknown as PluginConfigV003, mockAgent, baseConnection);
 
         // KAFKA_BROKERS дол��ен быть изменён
         expect(process.env.KAFKA_BROKERS).toBe('localhost:9092');
@@ -109,7 +111,7 @@ describe('pluginRunner', () => {
         const originalClientId = 'original-client';
         process.env.KAFKA_CLIENT_ID = originalClientId;
 
-        const handle = await runPlugin({ topics: ['test'], rules: [] }, mockAgent, baseConnection);
+        const handle = await runPlugin(createTestConfig({ rules: [] }) as unknown as PluginConfigV003, mockAgent, baseConnection);
 
         expect(process.env.KAFKA_CLIENT_ID).toBe('test-client');
 
@@ -124,7 +126,7 @@ describe('pluginRunner', () => {
         const originalGroupId = 'original-group';
         process.env.KAFKA_GROUP_ID = originalGroupId;
 
-        const handle = await runPlugin({ topics: ['test'], rules: [] }, mockAgent, baseConnection);
+        const handle = await runPlugin(createTestConfig({ rules: [] }) as unknown as PluginConfigV003, mockAgent, baseConnection);
 
         expect(process.env.KAFKA_GROUP_ID).toBe('test-group');
 
@@ -139,7 +141,7 @@ describe('pluginRunner', () => {
         // Убеждаемся что env var нет
         delete process.env.KAFKA_BROKERS;
 
-        const handle = await runPlugin({ topics: ['test'], rules: [] }, mockAgent, baseConnection);
+        const handle = await runPlugin(createTestConfig({ rules: [] }) as unknown as PluginConfigV003, mockAgent, baseConnection);
 
         // После остановки env var должен быть удалён
         await handle.stop();
@@ -151,7 +153,7 @@ describe('pluginRunner', () => {
         vi.mocked(startConsumer).mockResolvedValue(undefined);
 
         const handle = await runPlugin(
-          { topics: ['test'], rules: [] },
+          createTestConfig({ rules: [] }) as unknown as PluginConfigV003,
           mockAgent,
           { ...baseConnection, ssl: true }
         );
@@ -165,7 +167,7 @@ describe('pluginRunner', () => {
         vi.mocked(startConsumer).mockResolvedValue(undefined);
 
         const handle = await runPlugin(
-          { topics: ['test'], rules: [] },
+          createTestConfig({ rules: [] }) as unknown as PluginConfigV003,
           mockAgent,
           { ...baseConnection, ssl: false }
         );
@@ -179,7 +181,7 @@ describe('pluginRunner', () => {
         vi.mocked(startConsumer).mockResolvedValue(undefined);
 
         const handle = await runPlugin(
-          { topics: ['test'], rules: [] },
+          createTestConfig({ rules: [] }) as unknown as PluginConfigV003,
           mockAgent,
           { ...baseConnection, username: 'user', password: 'pass' }
         );
@@ -194,7 +196,7 @@ describe('pluginRunner', () => {
         vi.mocked(startConsumer).mockResolvedValue(undefined);
 
         const handle = await runPlugin(
-          { topics: ['test'], rules: [] },
+          createTestConfig({ rules: [] }) as unknown as PluginConfigV003,
           mockAgent,
           { ...baseConnection, saslMechanism: 'scram-sha-256' }
         );
@@ -208,7 +210,7 @@ describe('pluginRunner', () => {
         vi.mocked(startConsumer).mockResolvedValue(undefined);
 
         const handle = await runPlugin(
-          { topics: ['test'], rules: [] },
+          createTestConfig({ rules: [] }) as unknown as PluginConfigV003,
           mockAgent,
           { ...baseConnection, dlqTopic: 'dlq-topic' }
         );
@@ -222,7 +224,7 @@ describe('pluginRunner', () => {
         vi.mocked(startConsumer).mockResolvedValue(undefined);
 
         const handle = await runPlugin(
-          { topics: ['test'], rules: [] },
+          createTestConfig({ rules: [] }) as unknown as PluginConfigV003,
           mockAgent,
           { ...baseConnection, ignoreTombstones: true }
         );
@@ -240,7 +242,7 @@ describe('pluginRunner', () => {
 
         const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-        const handle = await runPlugin({ topics: ['test'], rules: [] }, mockAgent, baseConnection);
+        const handle = await runPlugin(createTestConfig({ rules: [] }) as unknown as PluginConfigV003, mockAgent, baseConnection);
 
         // Даём время для catch в pluginRunner
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -258,7 +260,7 @@ describe('pluginRunner', () => {
       it('должен восстановить process.exit после остановки', async () => {
         vi.mocked(startConsumer).mockResolvedValue(undefined);
 
-        const handle = await runPlugin({ topics: ['test'], rules: [] }, mockAgent, baseConnection);
+        const handle = await runPlugin(createTestConfig({ rules: [] }) as unknown as PluginConfigV003, mockAgent, baseConnection);
 
         // Вызываем stop
         await handle.stop();
@@ -272,7 +274,7 @@ describe('pluginRunner', () => {
 
         const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
 
-        const handle = await runPlugin({ topics: ['test'], rules: [] }, mockAgent, baseConnection);
+        const handle = await runPlugin(createTestConfig({ rules: [] }) as unknown as PluginConfigV003, mockAgent, baseConnection);
 
         await handle.stop();
 
@@ -296,7 +298,7 @@ describe('pluginRunner', () => {
         process.env.KAFKA_DLQ_TOPIC = 'old-dlq';
         process.env.KAFKA_IGNORE_TOMBSTONES = 'true';
 
-        const handle = await runPlugin({ topics: ['test'], rules: [] }, mockAgent, baseConnection);
+        const handle = await runPlugin(createTestConfig({ rules: [] }) as unknown as PluginConfigV003, mockAgent, baseConnection);
 
         await handle.stop();
 
@@ -326,7 +328,7 @@ describe('pluginRunner', () => {
         delete process.env.KAFKA_DLQ_TOPIC;
         delete process.env.KAFKA_IGNORE_TOMBSTONES;
 
-        const handle = await runPlugin({ topics: ['test'], rules: [] }, mockAgent, baseConnection);
+        const handle = await runPlugin(createTestConfig({ rules: [] }) as unknown as PluginConfigV003, mockAgent, baseConnection);
 
         await handle.stop();
 

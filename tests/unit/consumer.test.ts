@@ -4,6 +4,7 @@ import type { PluginConfigV003, RuleV003 } from '../../src/schemas/index.js';
 import type { Producer, Consumer, EachMessagePayload } from 'kafkajs';
 import type { IOpenCodeAgent, AgentResult } from '../../src/opencode/IOpenCodeAgent.js';
 import { mockConsumer, mockProducer, mockPayload } from './helpers/mockFactories.js';
+import { createTestConfig, createTestRule } from './helpers/testConfig.js';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const _ = mockConsumer || mockProducer || mockPayload;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -51,14 +52,7 @@ vi.mock('../../src/kafka/dlq.js', () => ({
 import { sendToDlq } from '../../src/kafka/dlq.js';
 
 // Базовый RuleV003 для тестов (категория A)
-const baseRuleV003: RuleV003 = {
-  name: 'test-rule',
-  jsonPath: '$.test',
-  promptTemplate: 'Process: ${$}',
-  agentId: 'test-agent',
-  timeoutMs: 30000,
-  concurrency: 1,
-};
+const baseRuleV003 = createTestRule({ promptTemplate: 'Process: ${$}' });
 
 describe('eachMessageHandler', () => {
   let mockDlqProducer: Producer;
@@ -110,10 +104,7 @@ describe('eachMessageHandler', () => {
       { ...baseRuleV003, name: 'test-rule' },
     ];
 
-    mockConfig = {
-      topics: ['test-topic'],
-      rules: rules,
-    };
+    mockConfig = createTestConfig({ topics: ['test-topic'], rules });
 
     // Reset mocks
     vi.clearAllMocks();
@@ -827,10 +818,7 @@ describe('eachMessageHandler shutdown state', () => {
       { ...baseRuleV003, name: 'test-rule' },
     ];
 
-    mockConfig = {
-      topics: ['test-topic'],
-      rules: rules,
-    };
+    mockConfig = createTestConfig({ topics: ['test-topic'], rules });
 
     vi.clearAllMocks();
   });
@@ -921,17 +909,10 @@ describe('eachMessageHandler KAFKA_IGNORE_TOMBSTONES', () => {
     activeSessions = new Set<AbortController>();
 
     const rules = [
-      {
-        name: 'test-rule',
-        jsonPath: '$.test',
-        promptTemplate: 'Process: ${$}',
-      },
-    ] as unknown as RuleV003[];
+      createTestRule({ name: 'test-rule', jsonPath: '$.test', promptTemplate: 'Process: ${$}' }),
+    ];
 
-    mockConfig = {
-      topics: ['test-topic'],
-      rules: rules,
-    };
+    mockConfig = createTestConfig({ topics: ['test-topic'], rules });
 
     vi.clearAllMocks();
   });
@@ -1276,16 +1257,12 @@ describe('startConsumer', () => {
   let processExitSpy: ReturnType<typeof vi.spyOn>;
   let processOnceSpy: ReturnType<typeof vi.spyOn>;
 
-  const mockConfig: PluginConfigV003 = {
+  const mockConfig = createTestConfig({
     topics: ['test-topic'],
     rules: [
-      {
-        name: 'test-rule',
-        jsonPath: '$.test',
-        promptTemplate: 'Process: ${$}',
-      },
-    ] as unknown as RuleV003[],
-  };
+      createTestRule({ name: 'test-rule', jsonPath: '$.test', promptTemplate: 'Process: ${$}' }),
+    ],
+  });
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -1568,10 +1545,8 @@ describe('agent invoke integration', () => {
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
-  const createConfigWithRules = (rules: RuleV003[]): PluginConfigV003 => ({
-    topics: ['test-topic'],
-    rules: rules,
-  } as unknown as PluginConfigV003);
+  const createConfigWithRules = (rules: RuleV003[]): PluginConfigV003 =>
+    createTestConfig({ topics: ['test-topic'], rules });
 
   const createPayload = (value: Record<string, unknown>, partition = 0, offset = '0'): EachMessagePayload => ({
     topic: 'test-topic',
@@ -1636,15 +1611,13 @@ describe('agent invoke integration', () => {
       timestamp: '2024-01-01T00:00:00.000Z',
     } as AgentResult);
 
-    const config = createConfigWithRules([{
+    const config = createConfigWithRules([createTestRule({
       name: 'test-rule',
       jsonPath: '$.type',
       promptTemplate: 'Process: ${$.type}',
       agentId: 'test-agent',
       responseTopic: 'response-topic',
-      timeoutMs: 120_000,
-      concurrency: 1,
-    }]);
+    })]);
 
     const payload = createPayload({ type: 'test' });
 
@@ -1664,14 +1637,12 @@ describe('agent invoke integration', () => {
       timestamp: '2024-01-01T00:00:00.000Z',
     } as AgentResult);
 
-    const config = createConfigWithRules([{
+    const config = createConfigWithRules([createTestRule({
       name: 'test-rule',
       jsonPath: '$.type',
       promptTemplate: 'Process: ${$.type}',
       agentId: 'test-agent',
-      timeoutMs: 120_000,
-      concurrency: 1,
-    }]);
+    })]);
 
     const payload = createPayload({ type: 'test' });
 
@@ -1691,15 +1662,13 @@ describe('agent invoke integration', () => {
       timestamp: '2024-01-01T00:00:00.000Z',
     } as AgentResult);
 
-    const config = createConfigWithRules([{
+    const config = createConfigWithRules([createTestRule({
       name: 'test-rule',
       jsonPath: '$.type',
       promptTemplate: 'Process: ${$.type}',
       agentId: 'test-agent',
       responseTopic: 'response-topic',
-      timeoutMs: 120_000,
-      concurrency: 1,
-    }]);
+    })]);
 
     const payload = createPayload({ type: 'test' });
 
@@ -1720,15 +1689,13 @@ describe('agent invoke integration', () => {
       timestamp: '2024-01-01T00:00:00.000Z',
     } as AgentResult);
 
-    const config = createConfigWithRules([{
+    const config = createConfigWithRules([createTestRule({
       name: 'test-rule',
       jsonPath: '$.type',
       promptTemplate: 'Process: ${$.type}',
       agentId: 'test-agent',
       responseTopic: 'response-topic',
-      timeoutMs: 120_000,
-      concurrency: 1,
-    }]);
+    })]);
 
     const payload = createPayload({ type: 'test' });
 
@@ -1742,15 +1709,13 @@ describe('agent invoke integration', () => {
   it('должен отправить в DLQ когда вызов агента выбрасывает исключение', async () => {
     mockAgent.invoke = vi.fn().mockRejectedValue(new Error('Unexpected invoke error'));
 
-    const config = createConfigWithRules([{
+    const config = createConfigWithRules([createTestRule({
       name: 'test-rule',
       jsonPath: '$.type',
       promptTemplate: 'Process: ${$.type}',
       agentId: 'test-agent',
       responseTopic: 'response-topic',
-      timeoutMs: 120_000,
-      concurrency: 1,
-    }]);
+    })]);
 
     const payload = createPayload({ type: 'test' });
 
@@ -1772,15 +1737,13 @@ describe('agent invoke integration', () => {
       } as AgentResult;
     });
 
-    const config = createConfigWithRules([{
+    const config = createConfigWithRules([createTestRule({
       name: 'test-rule',
       jsonPath: '$.type',
       promptTemplate: 'Process: ${$.type}',
       agentId: 'test-agent',
       responseTopic: 'response-topic',
-      timeoutMs: 120_000,
-      concurrency: 1,
-    }]);
+    })]);
 
     const payload = createPayload({ type: 'test' });
 
@@ -1793,15 +1756,13 @@ describe('agent invoke integration', () => {
   it('должен оставить activeSessions пустым при ошибке агента', async () => {
     mockAgent.invoke = vi.fn().mockRejectedValue(new Error('Agent error'));
 
-    const config = createConfigWithRules([{
+    const config = createConfigWithRules([createTestRule({
       name: 'test-rule',
       jsonPath: '$.type',
       promptTemplate: 'Process: ${$.type}',
       agentId: 'test-agent',
       responseTopic: 'response-topic',
-      timeoutMs: 120_000,
-      concurrency: 1,
-    }]);
+    })]);
 
     const payload = createPayload({ type: 'test' });
 
@@ -2142,21 +2103,9 @@ describe('DLQ error handling (FR-015)', () => {
 
     activeSessions = new Set<AbortController>();
 
-    const rules: RuleV003[] = [
-      {
-        name: 'test-rule',
-        jsonPath: '$.test',
-        promptTemplate: 'Process: ${$}',
-        agentId: 'test-agent',
-        timeoutMs: 30000,
-        concurrency: 1,
-      },
-    ];
+    const rules = [createTestRule({ name: 'test-rule', jsonPath: '$.test', promptTemplate: 'Process: ${$}', agentId: 'test-agent' })];
 
-    mockConfig = {
-      topics: ['test-topic'],
-      rules: rules,
-    } as unknown as PluginConfigV003;
+    mockConfig = createTestConfig({ topics: ['test-topic'], rules });
 
     vi.clearAllMocks();
   });
@@ -2192,15 +2141,13 @@ it('should send to DLQ with correct args on parse error', async () => {
 
   it('should send to DLQ with correct args on timeout', async () => {
     // Create config with agent rule
-    const config = createConfigWithRules([{
+    const config = createConfigWithRules([createTestRule({
       name: 'test-rule',
       jsonPath: '$.test',
       promptTemplate: 'Process: ${$}',
       agentId: 'test-agent',
       responseTopic: 'response-topic',
-      timeoutMs: 120_000,
-      concurrency: 1,
-    }]);
+    })]);
 
     // Mock agent to return timeout result
     mockAgent.invoke = vi.fn().mockResolvedValue({
@@ -2230,15 +2177,13 @@ it('should send to DLQ with correct args on parse error', async () => {
 
   it('should send to DLQ with correct args on agent error', async () => {
     // Create config with agent rule
-    const config = createConfigWithRules([{
+    const config = createConfigWithRules([createTestRule({
       name: 'test-rule',
       jsonPath: '$.test',
       promptTemplate: 'Process: ${$}',
       agentId: 'test-agent',
       responseTopic: 'response-topic',
-      timeoutMs: 120_000,
-      concurrency: 1,
-    }]);
+    })]);
 
     // Mock agent to return error result
     mockAgent.invoke = vi.fn().mockResolvedValue({
@@ -2268,15 +2213,13 @@ it('should send to DLQ with correct args on parse error', async () => {
 
   it('should send to DLQ with correct args on timeout', async () => {
     // Create config with agent rule
-    const config = createConfigWithRules([{
+    const config = createConfigWithRules([createTestRule({
       name: 'test-rule',
       jsonPath: '$.test',
       promptTemplate: 'Process: ${$}',
       agentId: 'test-agent',
       responseTopic: 'response-topic',
-      timeoutMs: 120_000,
-      concurrency: 1,
-    }]);
+    })]);
 
     // Mock agent to return timeout result
     mockAgent.invoke = vi.fn().mockResolvedValue({
@@ -2306,15 +2249,13 @@ it('should send to DLQ with correct args on parse error', async () => {
 
   it('should send to DLQ with correct args on agent error', async () => {
     // Create config with agent rule
-    const config = createConfigWithRules([{
+    const config = createConfigWithRules([createTestRule({
       name: 'test-rule',
       jsonPath: '$.test',
       promptTemplate: 'Process: ${$}',
       agentId: 'test-agent',
       responseTopic: 'response-topic',
-      timeoutMs: 120_000,
-      concurrency: 1,
-    }]);
+    })]);
 
     // Mock agent to return error result
     mockAgent.invoke = vi.fn().mockResolvedValue({
@@ -2370,15 +2311,13 @@ it('should send to DLQ with correct args on parse error', async () => {
 
   it('should commit offsets after DLQ is called', async () => {
     // Create config with agent rule to trigger agent path
-    const config = createConfigWithRules([{
+    const config = createConfigWithRules([createTestRule({
       name: 'test-rule',
       jsonPath: '$.test',
       promptTemplate: 'Process: ${$}',
       agentId: 'test-agent',
       responseTopic: 'response-topic',
-      timeoutMs: 120_000,
-      concurrency: 1,
-    }]);
+    })]);
 
     // Mock agent to return error to trigger DLQ path
     mockAgent.invoke = vi.fn().mockResolvedValue({
@@ -2420,19 +2359,10 @@ it('should send to DLQ with correct args on parse error', async () => {
       };
 
       // 2. Создаём payload и state
-      const slowConfig: PluginConfigV003 = {
+      const slowConfig = createTestConfig({
         topics: ['test-topic'],
-        rules: [
-          {
-            name: 'slow-rule',
-            jsonPath: '$.test',
-            promptTemplate: 'Process: ${$}',
-            agentId: 'slow-agent',
-            timeoutMs: 60000,
-            concurrency: 1,
-          },
-        ],
-      } as unknown as PluginConfigV003;
+        rules: [createTestRule({ name: 'slow-rule', jsonPath: '$.test', promptTemplate: 'Process: ${$}', agentId: 'slow-agent', timeoutMs: 60000 })],
+      });
 
       const payload = {
         topic: 'test-topic',

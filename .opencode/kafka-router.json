@@ -1,16 +1,25 @@
 {
   "version": "003",
-  "topics": ["e2e-debug-input"],
-  "dlqTopic": "e2e-debug-input-dlq",
+  "topics": ["opencode.prompts"],
+  "dlqTopic": "opencode.dlq",
   "rules": [
     {
-      "name": "debug-rule",
-      "jsonPath": "$.task",
-      "promptTemplate": "Выполни задачу: {{task}}",
+      "name": "default-prompt-rule",
+      "jsonPath": "$",
+      "promptTemplate": "You are a helpful assistant. Process this request and call send_to_kafka_default_prompt_rule with your answer.\n\nRequest: ${$}",
       "agentId": "e2e-responder",
-      "responseTopic": "e2e-debug-response",
-      "timeoutMs": 60000,
-      "topic": "e2e-debug-input"
+      "responseTopic": "opencode.responses",
+      "timeoutMs": 120000,
+      "concurrency": 1,
+      "requireToolCall": true,
+      "fallbackToTextCapture": false,
+      "safetyNetTimeoutMs": 60000,
+      "maxSessionMs": 180000
     }
-  ]
+  ],
+  "toggles": {
+    "toolDelivery": true,
+    "eventHook": true,
+    "pollingFallback": false
+  }
 }

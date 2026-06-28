@@ -54,6 +54,18 @@ export interface InvokeOptions {
   timeoutMs: number;
   /** Signal для отмены запроса (C2: заменяет фейковый UUID на AbortController) */
   signal?: AbortSignal;
+  /** spec-009: rule correlation for tool-based mode - matched rule name from kafka-router.json */
+  ruleName?: string;
+  /** spec-009: rule correlation for tool-based mode - matched rule's responseTopic */
+  responseTopic?: string;
+  /** Kafka message context for DLQ correlation */
+  kafkaMessageKey?: string | null;
+  /** Kafka message context for DLQ correlation */
+  kafkaTopic?: string;
+  /** Kafka message context for DLQ correlation */
+  kafkaPartition?: number;
+  /** Kafka message context for DLQ correlation */
+  kafkaOffset?: string;
 }
 
 // ============================================================================

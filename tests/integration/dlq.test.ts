@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach, afterEach } from 'vitest';
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
 import type { PluginConfigV003 } from '../../src/schemas/index.js';
+import { createTestConfig, createTestRule } from '../unit/helpers/testConfig.js';
 
 // Import setup functions
 import { createRedpandaContainer, cleanupRedpandaContainer } from './setup';
@@ -82,19 +83,10 @@ describe('Integration Tests: DLQ Flow', () => {
     deps = createMockHandlerDeps();
 
     // Создаем тестовую конфигурацию
-    mockConfig = {
+    mockConfig = createTestConfig({
       topics: ['test-topic'],
-      rules: [
-        {
-          name: 'test-rule',
-          jsonPath: '$.test',
-          promptTemplate: 'Process: ${$}',
-          agentId: 'test-agent',
-          timeoutMs: 30000,
-          concurrency: 1,
-        },
-      ],
-    };
+      rules: [createTestRule({ name: 'test-rule', jsonPath: '$.test', promptTemplate: 'Process: ${$}', agentId: 'test-agent' })],
+    });
 
     // Spy на console.log и console.error
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

@@ -18,14 +18,14 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     globals: true,
+    environment: 'node',
     include: ['tests/e2e/**/*.e2e.test.ts'],
-    // Увеличенные таймауты для реального Kafka + LLM + контейнер
     testTimeout: 120_000,
     hookTimeout: 60_000,
-    // Последовательное выполнение — один fork для изоляции state между тестами
     pool: 'forks',
-    singleFork: true,
-    // Подробный вывод для диагностики E2E
-    reporters: ['verbose'],
+    poolOptions: {
+      forks: { singleFork: true },
+    },
+    reporters: ['default'],
   },
 });

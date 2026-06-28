@@ -19,8 +19,8 @@ import type { Producer, EachMessagePayload } from 'kafkajs';
 import { Kafka } from 'kafkajs';
 
 import { eachMessageHandler } from '../../src/kafka/consumer.js';
-import type { PluginConfigV003, RuleV003 } from '../../src/schemas/index.js';
 import { MockOpenCodeAgent } from '../../src/opencode/MockOpenCodeAgent.js';
+import { createTestConfig, createTestRule } from '../unit/helpers/testConfig.js';
 
 // ============================================================================
 // Constants
@@ -81,13 +81,6 @@ function createTestState(): TestConsumerState {
     totalMessagesProcessed: 0,
     dlqMessagesCount: 0,
     lastDlqRateLogTime: Date.now(),
-  };
-}
-
-function createTestConfig(topics: string[], rules: RuleV003[]): PluginConfigV003 {
-  return {
-    topics,
-    rules,
   };
 }
 
@@ -218,17 +211,15 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
     it('T027-1: должен обработать сообщение и отправить response в responseTopic', async () => {
       if (!containerAvailable) return;
 
-      const rule: RuleV003 = {
+      const rule = createTestRule({
         name: 'success-rule',
         jsonPath: '$.type',
         promptTemplate: 'Process ${$.type}',
         agentId: 'success-agent',
         responseTopic: TEST_RESPONSE_TOPIC,
-        timeoutMs: 30_000,
-        concurrency: 1,
-      };
+      });
 
-      const config = createTestConfig([TEST_TOPIC], [rule]);
+      const config = createTestConfig({ topics: [TEST_TOPIC], rules: [rule] });
       const state = createTestState();
       const activeSessions = new Set<AbortController>();
       const mockCommit = async () => {};
@@ -353,17 +344,16 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
     it('T027-2: при timeout агента сообщение должно уйти в DLQ', async () => {
       if (!containerAvailable) return;
 
-      // @ts-expect-error — integration test rule may omit optional fields
-      const rule: RuleV003 = {
+      const rule = createTestRule({
         name: 'timeout-rule',
         jsonPath: '$.type',
         promptTemplate: 'Process ${$.type}',
         agentId: 'timeout-agent',
         responseTopic: TEST_RESPONSE_TOPIC,
         timeoutMs: 1_000, // 1 секунда timeout (меньше чем delayMs)
-      };
+      });
 
-      const config = createTestConfig([TEST_TOPIC], [rule]);
+      const config = createTestConfig({ topics: [TEST_TOPIC], rules: [rule] });
       const state = createTestState();
       const activeSessions = new Set<AbortController>();
       const mockCommit = async () => {};
@@ -484,17 +474,15 @@ describe('Integration Tests: Kafka + OpenCode Agent', () => {
     it('T027-3: при ошибке агента сообщение должно уйти в DLQ', async () => {
       if (!containerAvailable) return;
 
-const rule: RuleV003 = {
+      const rule = createTestRule({
         name: 'timeout-rule',
         jsonPath: '$.type',
         promptTemplate: 'Process ${$.type}',
         agentId: 'error-agent',
         responseTopic: TEST_RESPONSE_TOPIC,
-        timeoutMs: 30_000,
-        concurrency: 1,
-      };
+      });
 
-      const config = createTestConfig([TEST_TOPIC], [rule]);
+      const config = createTestConfig({ topics: [TEST_TOPIC], rules: [rule] });
       const state = createTestState();
       const activeSessions = new Set<AbortController>();
       const mockCommit = async () => {};
@@ -597,17 +585,15 @@ const rule: RuleV003 = {
     it('T027-4: tombstone (null value) должно уйти в DLQ', async () => {
       if (!containerAvailable) return;
 
-      const rule: RuleV003 = {
+      const rule = createTestRule({
         name: 'tombstone-rule',
         jsonPath: '$.type',
         promptTemplate: 'Process ${$.type}',
         agentId: 'any-agent',
         responseTopic: TEST_RESPONSE_TOPIC,
-        timeoutMs: 30_000,
-        concurrency: 1,
-      };
+      });
 
-      const config = createTestConfig([TEST_TOPIC], [rule]);
+      const config = createTestConfig({ topics: [TEST_TOPIC], rules: [rule] });
       const state = createTestState();
       const activeSessions = new Set<AbortController>();
       const mockCommit = async () => {};
@@ -691,17 +677,15 @@ const rule: RuleV003 = {
       if (!containerAvailable) return;
 
       // Правило которое НЕ matchирует наше сообщение
-      const rule: RuleV003 = {
+      const rule = createTestRule({
         name: 'unmatched-rule',
         jsonPath: '$.nonexistent.path[?(@.value=="specific")]',
         promptTemplate: 'Process ${$.type}',
         agentId: 'any-agent',
         responseTopic: TEST_RESPONSE_TOPIC,
-        timeoutMs: 30_000,
-        concurrency: 1,
-      };
+      });
 
-      const config = createTestConfig([TEST_TOPIC], [rule]);
+      const config = createTestConfig({ topics: [TEST_TOPIC], rules: [rule] });
       const state = createTestState();
       const activeSessions = new Set<AbortController>();
       const mockCommit = async () => {};
@@ -785,17 +769,15 @@ const rule: RuleV003 = {
       if (!containerAvailable) return;
 
       // Правило БЕЗ responseTopic
-      const rule: RuleV003 = {
+      const rule = createTestRule({
         name: 'no-response-topic-rule',
         jsonPath: '$.type',
         promptTemplate: 'Process ${$.type}',
         agentId: 'no-response-topic-agent',
         // responseTopic НЕ указан
-        timeoutMs: 30_000,
-        concurrency: 1,
-      };
+      });
 
-      const config = createTestConfig([TEST_TOPIC], [rule]);
+      const config = createTestConfig({ topics: [TEST_TOPIC], rules: [rule] });
       const state = createTestState();
       const activeSessions = new Set<AbortController>();
       const mockCommit = async () => {};

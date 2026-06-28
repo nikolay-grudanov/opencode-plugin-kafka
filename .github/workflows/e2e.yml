@@ -1,25 +1,78 @@
-name: E2E Tests
+name: E2E
+
+# spec-009: e2e tests with real Kafka + real OpenCode + real LLM.
+# These tests are EXPENSIVE (require running services) so we run them
+# only on workflow_dispatch, not on every push/PR.
 
 on:
-  workflow_dispatch: # Только ручной запуск — НЕ на каждый PR
+  workflow_dispatch:
+    inputs:
+      spec:
+        description: 'Which spec to test (009 = tool-based delivery, default)'
+        required: false
+        default: '009'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   e2e:
-    runs-on: self-hosted # Self-hosted runner с предустановленным Lemonade
-    timeout-minutes: 30
+    # Use self-hosted runner (spec-008 spec). Has Docker + OpenCode CLI + LLM access.
+    runs-on: [self-hosted, linux]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
         with:
-          node-version: '20'
+          node-version: 20
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run E2E tests
+      - name: Start Kafka (podman compose)
+        run: podman-compose -f docker-compose.kafka.yml up -d
+
+      - name: Wait for Kafka ready (up to 90s)
+        run: |
+          # Healthcheck выполняется ВНУТРИ контейнера через podman exec,
+          # поэтому используется внутренний порт 9092. Consumer использует
+          # внешний порт 9093 через проброс портов docker/podman.
+          for i in $(seq 1 18); do
+            if podman exec opencode-kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+              echo "Kafka ready after ${i}*5s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Kafka did not become ready in 90s"
+          podman logs opencode-kafka | tail -30
+          exit 1
+        timeout: 120000
+
+      - name: Run e2e tests (spec-009)
+        env:
+          KAFKA_BROKERS: localhost:9093
+          KAFKA_CLIENT_ID: ci-e2e-client
+          KAFKA_GROUP_ID: ci-e2e-group
         run: npm run test:e2e
+        timeout: 600000  # 10 minutes for e2e suite
+
+      - name: Collect e2e logs on failure
+        if: failure()
+        run: |
+          echo "=== opencode-kafka logs ==="
+          podman logs opencode-kafka 2>&1 | tail -100
+          echo "=== opencode-kafka-ui logs ==="
+          podman logs opencode-kafka-ui 2>&1 | tail -50
+
+      - name: Stop Kafka
+        if: always()
+        run: podman-compose -f docker-compose.kafka.yml down
