@@ -2,11 +2,11 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    // Use forks pool for stable graceful shutdown
-    pool: 'forks',
+    // Use threads pool to avoid tinypool IPC race condition in vitest 3.x CI
+    pool: 'threads',
     poolOptions: {
-      forks: {
-        singleFork: true,
+      threads: {
+        singleThread: true,
       },
     },
     fileParallelism: false,
